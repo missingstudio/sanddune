@@ -9,27 +9,36 @@
   ],
   "exports": {
     ".": {
+      "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
     "./sandboxes/docker": {
+      "types": "./dist/sandboxes/docker.d.ts",
       "import": "./dist/sandboxes/docker.js"
     },
     "./sandboxes/podman": {
+      "types": "./dist/sandboxes/podman.d.ts",
       "import": "./dist/sandboxes/podman.js"
     },
     "./sandboxes/vercel": {
+      "types": "./dist/sandboxes/vercel.d.ts",
       "import": "./dist/sandboxes/vercel.js"
     },
     "./sandboxes/no-sandbox": {
+      "types": "./dist/sandboxes/no-sandbox.d.ts",
       "import": "./dist/sandboxes/no-sandbox.js"
     }
   },
   "scripts": {
-    "build": "bun build src/index.ts src/sandboxes/docker.ts src/sandboxes/podman.ts src/sandboxes/vercel.ts src/sandboxes/no-sandbox.ts --outdir dist --target node --format esm --packages external",
+    "build": "tsc -p tsconfig.build.json && bun build src/index.ts src/sandboxes/docker.ts src/sandboxes/podman.ts src/sandboxes/vercel.ts src/sandboxes/no-sandbox.ts --outdir dist --target node --format esm --packages external",
     "typecheck": "tsgo --noEmit",
     "test": "bun test"
   },
   "publishConfig": {
     "access": "public"
+  },
+  "dependencies": {
+    "@missingstudio/sanddune-core": "workspace:*",
+    "effect": "^3.21.2"
   }
 }

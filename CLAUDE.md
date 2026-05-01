@@ -1,4 +1,4 @@
-Use `bun run typecheck` for type checking. Typecheck runs `tsgo --noEmit`; emit (when needed) goes through `bun build`. Bun is the runtime.
+Use `bun run typecheck` for type checking. Typecheck runs `tsgo --noEmit`. Build emits both JS (via `bun build`) and `.d.ts` declarations (via `tsc -p tsconfig.build.json`). Bun is the runtime.
 
 Check [./CONTEXT.md](./CONTEXT.md) for terminology questions.
 
