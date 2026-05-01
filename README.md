@@ -1159,10 +1159,10 @@ hooks: {
 ## Development
 
 ```bash
-npm install
-npm run build    # Build with tsgo
-npm test         # Run tests with vitest
-npm run typecheck # Type-check
+bun install
+bun run build      # Build with bun build (per package, orchestrated by turbo)
+bun test           # Run tests with bun test
+bun run typecheck  # Type-check with tsgo
 ```
 
 ## License

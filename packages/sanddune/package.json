@@ -1,0 +1,35 @@
+{
+  "name": "@missingstudio/sanddune",
+  "version": "0.0.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "import": "./dist/index.js"
+    },
+    "./sandboxes/docker": {
+      "import": "./dist/sandboxes/docker.js"
+    },
+    "./sandboxes/podman": {
+      "import": "./dist/sandboxes/podman.js"
+    },
+    "./sandboxes/vercel": {
+      "import": "./dist/sandboxes/vercel.js"
+    },
+    "./sandboxes/no-sandbox": {
+      "import": "./dist/sandboxes/no-sandbox.js"
+    }
+  },
+  "scripts": {
+    "build": "bun build src/index.ts src/sandboxes/docker.ts src/sandboxes/podman.ts src/sandboxes/vercel.ts src/sandboxes/no-sandbox.ts --outdir dist --target node --format esm --packages external",
+    "typecheck": "tsgo --noEmit",
+    "test": "bun test"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
