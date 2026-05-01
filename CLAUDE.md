@@ -1,4 +1,4 @@
-Use `npm run typecheck` for type checking.
+Use `bun run typecheck` for type checking. Typecheck runs `tsgo --noEmit`; emit (when needed) goes through `bun build`. Bun is the runtime.
 
 Check [./CONTEXT.md](./CONTEXT.md) for terminology questions.
 

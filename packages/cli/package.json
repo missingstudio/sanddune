@@ -1,0 +1,20 @@
+{
+  "name": "@missingstudio/sanddune-cli",
+  "version": "0.0.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "bin": {
+    "sanddune": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "bun build src/index.ts --outdir dist --target node --format esm --packages external && chmod +x dist/index.js",
+    "typecheck": "tsgo --noEmit",
+    "test": "bun test"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

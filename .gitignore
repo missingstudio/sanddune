@@ -3,3 +3,4 @@ dist
 issues
 .env.*
 .vercel
+.turbo
