@@ -1,36 +1,18 @@
-import { spawn } from "node:child_process";
+import { spawnHost, type ProcessResult } from "./host-process";
 
-export interface ProcessResult {
-  readonly stdout: string;
-  readonly stderr: string;
-  readonly exitCode: number;
-}
+export type { ProcessResult };
 
-export function runGit(
+/** Run a `git` invocation in `cwd`. Throws on non-zero exit, with the
+ *  command and stderr included in the error. */
+export async function runGit(
   cwd: string,
   args: readonly string[],
 ): Promise<ProcessResult> {
-  return new Promise((resolve, reject) => {
-    const proc = spawn("git", args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
-
-    const stdoutChunks: Buffer[] = [];
-    const stderrChunks: Buffer[] = [];
-    proc.stdout?.on("data", (c: Buffer) => stdoutChunks.push(c));
-    proc.stderr?.on("data", (c: Buffer) => stderrChunks.push(c));
-
-    proc.on("error", reject);
-    proc.on("close", (code) => {
-      const stdout = Buffer.concat(stdoutChunks).toString("utf8");
-      const stderr = Buffer.concat(stderrChunks).toString("utf8");
-      if (code !== 0) {
-        reject(
-          new Error(
-            `git ${args.join(" ")} failed (exit ${code}): ${stderr.trim()}`,
-          ),
-        );
-        return;
-      }
-      resolve({ stdout, stderr, exitCode: code ?? 0 });
-    });
-  });
+  const result = await spawnHost("git", args, { cwd });
+  if (result.exitCode !== 0) {
+    throw new Error(
+      `git ${args.join(" ")} failed (exit ${result.exitCode}): ${result.stderr.trim()}`,
+    );
+  }
+  return result;
 }

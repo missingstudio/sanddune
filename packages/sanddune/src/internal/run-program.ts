@@ -1,5 +1,5 @@
 import { Effect, Layer } from "effect";
-import { resolve as resolvePath } from "node:path";
+import { join, resolve as resolvePath } from "node:path";
 import {
   AgentInvoker,
   resolveBranchStrategy,
@@ -37,10 +37,12 @@ export async function runProgram(
 
   const provider = options.sandbox;
   const cwd = resolvePath(options.cwd ?? process.cwd());
-  const env = resolveEnv({
+  const env = await resolveEnv({
     processEnv: process.env,
+    sandduneEnvPath: join(cwd, ".sanddune", ".env"),
     agentEnv: options.agent.env,
     sandboxEnv: provider.env,
+    runOptionsEnv: options.env,
   });
   const targetBranch = await gitCurrentBranch(cwd);
 
@@ -68,6 +70,7 @@ export async function runProgram(
   try {
     handle = await provider.create({
       worktreePath: strategy.worktreePath,
+      hostRepoPath: cwd,
       env,
     });
 

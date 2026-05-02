@@ -1,6 +1,4 @@
-import { spawn } from "node:child_process";
-import { basename, resolve } from "node:path";
-import { createInterface } from "node:readline";
+import { resolve } from "node:path";
 import {
   createBindMountSandboxProvider,
   type BindMountCreateOptions,
@@ -9,6 +7,12 @@ import {
   type ExecOptions,
   type ExecResult,
 } from "@missingstudio/sanddune-core";
+import {
+  defaultImageName,
+  resolveParentGitMount,
+  type BindMount,
+} from "../internal/bind-mount-provisioning";
+import { spawnHost } from "../internal/host-process";
 
 export interface DockerOptions {
   readonly image?: string;
@@ -25,13 +29,17 @@ export function docker(options?: DockerOptions): BindMountSandboxProvider {
       createOptions: BindMountCreateOptions,
     ): Promise<BindMountSandboxHandle> => {
       const hostWorktreePath = resolve(createOptions.worktreePath);
-      const image = options?.image ?? `sanddune:${basename(hostWorktreePath)}`;
+      const image =
+        options?.image ?? defaultImageName(createOptions.hostRepoPath);
 
       await ensureImageExists(image);
+
+      const extraGitMount = await resolveParentGitMount(hostWorktreePath);
 
       const containerId = await dockerRun({
         image,
         hostWorktreePath,
+        extraMounts: extraGitMount ? [extraGitMount] : [],
         env: createOptions.env,
       });
 
@@ -48,11 +56,7 @@ export function docker(options?: DockerOptions): BindMountSandboxProvider {
 }
 
 async function ensureImageExists(image: string): Promise<void> {
-  const result = await runHostProcess(
-    "docker",
-    ["image", "inspect", image],
-    {},
-  );
+  const result = await spawnHost("docker", ["image", "inspect", image]);
   if (result.exitCode !== 0) {
     throw new Error(
       `Docker image "${image}" not found. Build it with \`sanddune docker build-image\` (or pass an existing image via docker({ image: "..." })).`,
@@ -63,6 +67,7 @@ async function ensureImageExists(image: string): Promise<void> {
 async function dockerRun(params: {
   image: string;
   hostWorktreePath: string;
+  extraMounts: readonly BindMount[];
   env: Readonly<Record<string, string>>;
 }): Promise<string> {
   const args = [
@@ -74,12 +79,15 @@ async function dockerRun(params: {
     "-w",
     SANDBOX_WORKTREE,
   ];
+  for (const mount of params.extraMounts) {
+    args.push("-v", `${mount.hostPath}:${mount.sandboxPath}`);
+  }
   for (const [key, value] of Object.entries(params.env)) {
     args.push("-e", `${key}=${value}`);
   }
   args.push(params.image, "sleep", "infinity");
 
-  const result = await runHostProcess("docker", args, {});
+  const result = await spawnHost("docker", args);
   if (result.exitCode !== 0) {
     throw new Error(
       `docker run failed (exit ${result.exitCode}): ${result.stderr.trim()}`,
@@ -98,50 +106,9 @@ async function dockerExec(
     args.push("-w", options.cwd);
   }
   args.push(containerId, "sh", "-c", command);
-  return runHostProcess("docker", args, { onLine: options?.onLine });
+  return spawnHost("docker", args, { onLine: options?.onLine });
 }
 
 async function dockerRm(containerId: string): Promise<void> {
-  await runHostProcess("docker", ["rm", "-f", containerId], {});
-}
-
-function runHostProcess(
-  cmd: string,
-  args: readonly string[],
-  options: { onLine?: (line: string) => void },
-): Promise<ExecResult> {
-  return new Promise((resolvePromise, reject) => {
-    const proc = spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"] });
-    const stdoutChunks: string[] = [];
-    const stderrChunks: string[] = [];
-
-    if (options.onLine && proc.stdout) {
-      const onLine = options.onLine;
-      const rl = createInterface({ input: proc.stdout });
-      rl.on("line", (line) => {
-        stdoutChunks.push(line);
-        onLine(line);
-      });
-    } else if (proc.stdout) {
-      proc.stdout.on("data", (chunk: Buffer) => {
-        stdoutChunks.push(chunk.toString());
-      });
-    }
-
-    proc.stderr?.on("data", (chunk: Buffer) => {
-      stderrChunks.push(chunk.toString());
-    });
-
-    proc.on("error", reject);
-    proc.on("close", (code) => {
-      const stdout = options.onLine
-        ? stdoutChunks.join("\n")
-        : stdoutChunks.join("");
-      resolvePromise({
-        stdout,
-        stderr: stderrChunks.join(""),
-        exitCode: code ?? 0,
-      });
-    });
-  });
+  await spawnHost("docker", ["rm", "-f", containerId]);
 }
