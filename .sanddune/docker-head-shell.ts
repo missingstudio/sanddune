@@ -1,15 +1,15 @@
-// Validates the merge-to-head plumbing deterministically by running a shell
-// "agent" inside the Docker container — no Claude API involved. Use this when
-// you want to exercise the worktree → iteration → merge-back → close lifecycle
-// without depending on a slow external service.
+// Validates the head branch strategy deterministically by running a shell
+// "agent" inside the Docker container — no Claude API involved. Sister to
+// docker-merge-to-head-shell.ts; this one writes directly to the host
+// working tree.
 //
 // What it asserts at the end: the agent's commit landed on the host's HEAD
-// (the temp source branch fast-forwarded into target), the temp branch was
-// deleted, the worktree was removed cleanly, and the lock was released.
+// (head strategy means no merge step), the agent ran with the container's
+// own ~/.gitconfig (proves the env-resolver fix — no inline `-c` overrides).
 //
 // Roll back when you're done:
 //   git reset --hard HEAD~1
-//   rm -f MERGE-TO-HEAD-SHELL.md
+//   rm -f HEAD-SHELL.md
 
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
@@ -21,17 +21,17 @@ const headBefore = git("rev-parse", "HEAD");
 const branchBefore = git("rev-parse", "--abbrev-ref", "HEAD");
 console.log(`host before run: ${branchBefore} @ ${headBefore.slice(0, 12)}`);
 
-// A scripted "agent" that creates a file and commits it — no model, no API.
-// Relies on the Dockerfile's global ~/.gitconfig for identity. This is only
-// reachable because resolveEnv strips host-only shell vars (HOME, USER, ...)
-// from the env that flows into the sandbox.
+// A scripted "agent" that creates a file and commits — no -c overrides.
+// The Dockerfile sets user.email/user.name in the container's global config;
+// this passes only because resolveEnv strips host-only shell vars (HOME, etc.)
+// that would otherwise shadow it.
 const shellAgent = createAgentProvider({
   name: "shell-agent",
   buildCommand: () =>
     [
-      "echo 'hello from merge-to-head (shell agent)' > MERGE-TO-HEAD-SHELL.md",
-      "git add MERGE-TO-HEAD-SHELL.md",
-      "git commit -m 'add MERGE-TO-HEAD-SHELL.md'",
+      "echo 'hello from head (shell agent)' > HEAD-SHELL.md",
+      "git add HEAD-SHELL.md",
+      "git commit -m 'add HEAD-SHELL.md'",
     ].join(" && "),
   parseLine: () => [],
 });
@@ -40,7 +40,7 @@ const result = await run({
   agent: shellAgent,
   sandbox: docker(),
   prompt: "ignored — buildCommand drives the commit",
-  branchStrategy: { type: "merge-to-head" },
+  // branchStrategy omitted → defaults to head for bind-mount providers.
 });
 
 const headAfter = git("rev-parse", "HEAD");
@@ -65,20 +65,30 @@ if (result.commits[0] !== headAfter) {
   );
 }
 if (headAfter === headBefore) {
-  failures.push("host HEAD did not advance — merge-back never landed");
+  failures.push("host HEAD did not advance");
 }
-if (!existsSync(resolve("MERGE-TO-HEAD-SHELL.md"))) {
-  failures.push("MERGE-TO-HEAD-SHELL.md is not on the host working tree");
+if (!existsSync(resolve("HEAD-SHELL.md"))) {
+  failures.push("HEAD-SHELL.md is not on the host working tree");
 }
-if (result.worktreePath !== undefined) {
+if (result.sourceBranch !== branchBefore) {
   failures.push(
-    `worktree was preserved (${result.worktreePath}) — expected clean removal`,
+    `expected sourceBranch == host branch (${branchBefore}), got ${result.sourceBranch}`,
+  );
+}
+if (result.targetBranch !== branchBefore) {
+  failures.push(
+    `expected targetBranch == host branch (${branchBefore}), got ${result.targetBranch}`,
   );
 }
 
-const branchList = git("branch", "--list", "sanddune/merge-to-head/*");
-if (branchList.trim().length > 0) {
-  failures.push(`leftover temp branches:\n${branchList}`);
+// Identity check: the commit's author should be the Dockerfile's identity,
+// proving the container's global ~/.gitconfig was honored (i.e. env-resolver
+// did not leak the host's HOME).
+const commitAuthor = git("log", "-1", "--pretty=%ae");
+if (commitAuthor !== "agent@sanddune.local") {
+  failures.push(
+    `commit author email is ${commitAuthor}, expected agent@sanddune.local — env-resolver may be leaking HOME into the sandbox`,
+  );
 }
 
 if (failures.length > 0) {
@@ -87,7 +97,7 @@ if (failures.length > 0) {
   process.exit(1);
 }
 
-console.log("\nOK: merge-to-head plumbing validated end-to-end");
+console.log("\nOK: head strategy + container ~/.gitconfig validated");
 
 function git(...args: string[]): string {
   const r = spawnSync("git", args, { encoding: "utf8" });
