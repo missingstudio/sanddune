@@ -22,6 +22,7 @@ export interface SandboxProvider<K extends SandboxKind = SandboxKind> {
 
 export interface BindMountCreateOptions {
   readonly worktreePath: string;
+  readonly hostRepoPath: string;
   readonly env: Readonly<Record<string, string>>;
 }
 

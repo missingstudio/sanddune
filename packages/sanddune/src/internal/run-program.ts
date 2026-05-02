@@ -68,6 +68,7 @@ export async function runProgram(
   try {
     handle = await provider.create({
       worktreePath: strategy.worktreePath,
+      hostRepoPath: cwd,
       env,
     });
 

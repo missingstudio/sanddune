@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import { basename, resolve } from "node:path";
+import { readFile, stat } from "node:fs/promises";
+import { basename, dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import {
   createBindMountSandboxProvider,
@@ -17,6 +18,18 @@ export interface DockerOptions {
 
 const SANDBOX_WORKTREE = "/workspace";
 
+/** Default image tag derived from the host repo's directory name.
+ *  Lowercased and sanitized so any repo dir produces a valid tag. */
+export function defaultImageName(hostRepoPath: string): string {
+  const dirName =
+    hostRepoPath
+      .replace(/[\\/]+$/, "")
+      .split(/[\\/]/)
+      .pop() ?? "local";
+  const sanitized = dirName.toLowerCase().replace(/[^a-z0-9_.-]/g, "-");
+  return `sanddune:${sanitized || "local"}`;
+}
+
 export function docker(options?: DockerOptions): BindMountSandboxProvider {
   return createBindMountSandboxProvider({
     name: "docker",
@@ -25,13 +38,21 @@ export function docker(options?: DockerOptions): BindMountSandboxProvider {
       createOptions: BindMountCreateOptions,
     ): Promise<BindMountSandboxHandle> => {
       const hostWorktreePath = resolve(createOptions.worktreePath);
-      const image = options?.image ?? `sanddune:${basename(hostWorktreePath)}`;
+      const image =
+        options?.image ?? defaultImageName(createOptions.hostRepoPath);
 
       await ensureImageExists(image);
+
+      // When the worktree is a git worktree (not a regular checkout),
+      // `<worktree>/.git` is a pointer file at `gitdir: <host>/.git/worktrees/<id>`.
+      // The container can't follow that pointer unless we also bind-mount the
+      // parent .git dir at its host path. Per ADR-0006.
+      const extraGitMount = await resolveParentGitMount(hostWorktreePath);
 
       const containerId = await dockerRun({
         image,
         hostWorktreePath,
+        extraMounts: extraGitMount ? [extraGitMount] : [],
         env: createOptions.env,
       });
 
@@ -60,9 +81,15 @@ async function ensureImageExists(image: string): Promise<void> {
   }
 }
 
+interface BindMount {
+  readonly hostPath: string;
+  readonly sandboxPath: string;
+}
+
 async function dockerRun(params: {
   image: string;
   hostWorktreePath: string;
+  extraMounts: readonly BindMount[];
   env: Readonly<Record<string, string>>;
 }): Promise<string> {
   const args = [
@@ -74,6 +101,9 @@ async function dockerRun(params: {
     "-w",
     SANDBOX_WORKTREE,
   ];
+  for (const mount of params.extraMounts) {
+    args.push("-v", `${mount.hostPath}:${mount.sandboxPath}`);
+  }
   for (const [key, value] of Object.entries(params.env)) {
     args.push("-e", `${key}=${value}`);
   }
@@ -86,6 +116,47 @@ async function dockerRun(params: {
     );
   }
   return result.stdout.trim();
+}
+
+/** When `<worktreePath>/.git` is a pointer file (worktree, not regular
+ *  checkout), parse it to find the parent `.git` directory and return a
+ *  bind-mount entry for it. Returns null when the worktree's `.git` is a
+ *  directory (regular checkout) or when the pointer can't be parsed. */
+export async function resolveParentGitMount(
+  worktreePath: string,
+): Promise<BindMount | null> {
+  const gitPath = join(worktreePath, ".git");
+  let gitStat;
+  try {
+    gitStat = await stat(gitPath);
+  } catch {
+    return null;
+  }
+  if (!gitStat.isFile()) return null;
+
+  let content: string;
+  try {
+    content = await readFile(gitPath, "utf8");
+  } catch {
+    return null;
+  }
+  const match = content.match(/^gitdir:\s*(.+?)\s*$/m);
+  if (!match) return null;
+
+  const gitdirPath = match[1];
+  if (typeof gitdirPath !== "string") return null;
+
+  // gitdirPath is e.g. /repo/.git/worktrees/<id>. Walk up until we hit the
+  // segment named `.git` — that's the parent .git directory we need to mount.
+  let dir = gitdirPath;
+  while (basename(dir) !== ".git" && dir !== "/" && dir.length > 0) {
+    const next = dirname(dir);
+    if (next === dir) break;
+    dir = next;
+  }
+  if (basename(dir) !== ".git") return null;
+
+  return { hostPath: dir, sandboxPath: dir };
 }
 
 async function dockerExec(
