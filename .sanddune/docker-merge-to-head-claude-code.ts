@@ -17,8 +17,9 @@ import { spawnSync } from "node:child_process";
 import { run, claudeCode } from "@missingstudio/sanddune";
 import { docker } from "@missingstudio/sanddune/sandboxes/docker";
 
-const apiKey = process.env["ANTHROPIC_API_KEY"];
-if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set.");
+// ANTHROPIC_API_KEY is read from .sanddune/.env (declared there with either
+// the literal value or an empty `KEY=`, in which case sanddune falls back
+// to process.env). See ADR-0012.
 
 const headBefore = git("rev-parse", "HEAD");
 const branchBefore = git("rev-parse", "--abbrev-ref", "HEAD");

@@ -29,10 +29,10 @@ docker image inspect sanddune:sanddune >/dev/null && echo ok
 
 ```bash
 cp .sanddune/.env.example .sanddune/.env
-set -a && source .sanddune/.env && set +a
+# Then edit .sanddune/.env and fill in ANTHROPIC_API_KEY=...
 ```
 
-`.sanddune/.env` is gitignored.
+Sanddune reads `.sanddune/.env` at launch — no manual `source` step needed. Per ADR-0012, `.sanddune/.env` is also the *declaration site* for which env vars reach the sandbox: a key with no value here will be filled in from `process.env` if it's exported in your shell, but a key that isn't declared anywhere won't reach the sandbox at all. `.sanddune/.env` is gitignored.
 
 ## 4. Run sanddune
 
