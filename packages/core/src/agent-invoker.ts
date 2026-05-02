@@ -15,7 +15,7 @@ export interface AgentInvokeResult {
 export interface AgentInvokerService {
   readonly invoke: (
     input: AgentInvokeInput,
-  ) => Effect.Effect<AgentInvokeResult>;
+  ) => Effect.Effect<AgentInvokeResult, Error>;
 }
 
 export class AgentInvoker extends Context.Tag(

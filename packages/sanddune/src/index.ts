@@ -11,13 +11,15 @@ import type {
   Sandbox,
   Worktree,
 } from "@missingstudio/sanddune-core";
+import { runProgram } from "./internal/run-program";
 
 export * from "@missingstudio/sanddune-core";
+export { claudeCode, type ClaudeCodeOptions } from "./agents/claude-code";
 
 export function run<S extends RunSandboxProvider>(
-  _options: RunOptions<S>,
+  options: RunOptions<S>,
 ): Promise<RunResult> {
-  throw new NotImplementedError("run");
+  return runProgram(options as RunOptions<RunSandboxProvider>);
 }
 
 export function createSandbox<S extends CreateSandboxProvider>(

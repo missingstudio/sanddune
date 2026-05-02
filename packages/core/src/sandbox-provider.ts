@@ -6,14 +6,46 @@ export interface ExecResult {
   readonly exitCode: number;
 }
 
+export interface ExecOptions {
+  readonly cwd?: string;
+  readonly sudo?: boolean;
+  readonly onLine?: (line: string) => void;
+}
+
 export type SandboxKind = "bind-mount" | "isolated" | "no-sandbox";
 
 export interface SandboxProvider<K extends SandboxKind = SandboxKind> {
   readonly kind: K;
+  readonly name: string;
   readonly env?: Readonly<Record<string, string>>;
 }
 
-export type BindMountSandboxProvider = SandboxProvider<"bind-mount">;
+export interface BindMountCreateOptions {
+  readonly worktreePath: string;
+  readonly env: Readonly<Record<string, string>>;
+}
+
+export interface BindMountSandboxHandle {
+  readonly worktreePath: string;
+  exec(command: string, options?: ExecOptions): Promise<ExecResult>;
+  close(): Promise<void>;
+}
+
+export interface BindMountSandboxProvider extends SandboxProvider<"bind-mount"> {
+  readonly create: (
+    options: BindMountCreateOptions,
+  ) => Promise<BindMountSandboxHandle>;
+}
+
+export interface IsolatedSandboxHandle {
+  readonly worktreePath: string;
+  exec(command: string, options?: ExecOptions): Promise<ExecResult>;
+  copyIn(source: string, destination: string): Promise<void>;
+  copyFileOut(source: string, destination: string): Promise<void>;
+  extractCommits(branch: string): Promise<readonly string[]>;
+  close(): Promise<void>;
+}
+
 export type IsolatedSandboxProvider = SandboxProvider<"isolated">;
 export type NoSandboxProvider = SandboxProvider<"no-sandbox">;
 
@@ -33,15 +65,17 @@ export type AllowedBranchStrategy<S extends SandboxProvider> = [S] extends [
   ? NonHeadBranchStrategy
   : BranchStrategy;
 
-export interface BindMountSandboxHandle {
-  exec(command: string, options?: { sudo?: boolean }): Promise<ExecResult>;
-  close(): Promise<void>;
-}
-
-export interface IsolatedSandboxHandle {
-  exec(command: string, options?: { sudo?: boolean }): Promise<ExecResult>;
-  copyIn(source: string, destination: string): Promise<void>;
-  copyFileOut(source: string, destination: string): Promise<void>;
-  extractCommits(branch: string): Promise<readonly string[]>;
-  close(): Promise<void>;
+export function createBindMountSandboxProvider(config: {
+  readonly name: string;
+  readonly env?: Readonly<Record<string, string>>;
+  readonly create: (
+    options: BindMountCreateOptions,
+  ) => Promise<BindMountSandboxHandle>;
+}): BindMountSandboxProvider {
+  return {
+    kind: "bind-mount",
+    name: config.name,
+    env: config.env,
+    create: config.create,
+  };
 }
