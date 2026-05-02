@@ -37,6 +37,8 @@ export interface RunResult {
   readonly iterations: readonly IterationResult[];
   readonly commits: readonly string[];
   readonly completionSignal?: CompletionSignal;
+  readonly stdout: string;
+  readonly logFilePath: string;
 }
 
 export type RunOptions<S extends RunSandboxProvider = RunSandboxProvider> =

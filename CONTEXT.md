@@ -86,6 +86,10 @@ _Avoid_: "agent runner", "agent caller"
 A single invocation of the **agent** inside the **sandbox**, producing at most one commit against one **task**.
 _Avoid_: "run" (ambiguous with the JS `run()` function), "cycle", "loop"
 
+**Iteration loop**:
+The bounded sequence of **iterations** that runs between sandbox-up and sandbox-down inside `run()`, `Worktree.run()`, or `Sandbox.run()`. Constructed once per call; given a live sandbox handle, an **agent invoker**, a **run log** to write to, and the iteration controls (`maxIterations`, `completionSignal`, `idleTimeoutSeconds`, `signal`). Owns the per-iteration **agent invoker** call, **prompt expansion** for **prompt templates**, commit extraction, **completion signal** detection, idle timeout enforcement, and **agent session** capture. Does not own: sandbox or **worktree** lifecycle, **run log** lifecycle, **prompt argument substitution** (which runs once on the **host** before the loop). Terminates on `maxIterations`, **completion signal** match, abort, or idle timeout. Per ADR-0011, abort and idle timeout interrupt the loop but leave the sandbox handle alive for a re-run.
+_Avoid_: "iteration runner", "run session", "main loop", "loop" alone
+
 **Task**:
 A work item from the **backlog manager** that the **agent** selects and works on during an **iteration**.
 _Avoid_: "job", "work item", "ticket"
@@ -212,7 +216,8 @@ _Avoid_: "log event" (the log file contains more than just agent output), "displ
 - **Host hooks** run on the **host**; **sandbox hooks** run inside the **sandbox**. Hooks are grouped under `host` and `sandbox` in the `hooks` option
 - Lifecycle ordering: `copyToWorktree` -> `host.onWorktreeReady` (sequential) -> sandbox created -> `host.onSandboxReady` + `sandbox.onSandboxReady` (parallel)
 - `host.onSandboxReady` and `sandbox.onSandboxReady` run in parallel and are not coordinated. Setup that requires ordering between **host** and **sandbox** must live entirely on one side -- typically `sandbox.onSandboxReady` for anything that touches repo dependencies; `host.onSandboxReady` is reserved for observability hooks (tail logs, register the run with a dashboard) that don't depend on sandbox state being settled
-- Each **iteration** may produce one or more commits; iterations repeat until the **completion signal** fires or the max count is reached
+- Each **iteration** may produce one or more commits; the **iteration loop** repeats until the **completion signal** fires, `maxIterations` is reached, or the loop is interrupted by abort or idle timeout
+- The **iteration loop** is the same primitive across `run()`, `Worktree.run()`, and `Sandbox.run()` — they differ only in who owns the **worktree** and **sandbox** lifecycles around the loop
 - **Init** creates the **config directory** on the **host**, prompting the user to select an **agent** and **backlog manager**
 - **Init** performs **template argument substitution** on Dockerfiles and scaffold `.md` files, replacing **template arguments** with values derived from the user's choices
 - Each **backlog manager** declares a Dockerfile snippet (installed via **template argument substitution**) and command placeholders for **prompt** templates
