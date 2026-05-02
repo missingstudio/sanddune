@@ -11,7 +11,15 @@
  *  - `TERM_PROGRAM`, `COLORTERM`, `ITERM_*` → terminal-emulator-specific.
  *
  *  Provider env (`agentEnv`, `sandboxEnv`) and `RunOptions.env` (future)
- *  bypass this filter, since callers explicitly opt in to those keys. */
+ *  bypass this filter, since callers explicitly opt in to those keys.
+ *
+ *  ASSUMPTION: this list is correct for **bind-mount** and **isolated**
+ *  sandbox providers, where the sandbox has its own filesystem layout and
+ *  shell environment. For the **no-sandbox provider** (#18), the agent runs
+ *  directly on the host, so HOME/PATH/USER from `process.env` are exactly
+ *  what's wanted. When that provider lands, env policy should move from a
+ *  global blocklist to a per-provider declaration — see the architecture
+ *  notes for the suggested seam. */
 const HOST_ONLY_ENV_KEYS: ReadonlySet<string> = new Set([
   "HOME",
   "USER",
