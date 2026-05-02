@@ -12,7 +12,8 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json && bun build src/index.ts --outdir dist --target node --format esm --packages external",
-    "typecheck": "tsgo --noEmit"
+    "typecheck": "tsgo --noEmit",
+    "test": "bun test"
   },
   "dependencies": {
     "effect": "^3.21.2"

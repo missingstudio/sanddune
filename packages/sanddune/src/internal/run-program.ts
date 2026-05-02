@@ -2,17 +2,19 @@ import { Effect, Layer } from "effect";
 import { resolve as resolvePath } from "node:path";
 import {
   AgentInvoker,
+  resolveBranchStrategy,
   type BindMountSandboxHandle,
   type RunOptions,
   type RunResult,
   type RunSandboxProvider,
 } from "@missingstudio/sanddune-core";
 import { resolveEnv } from "./env-resolver";
-import { gitCurrentBranch, gitHeadSha } from "./git";
+import { gitCurrentBranch, gitHeadSha, gitNewCommits } from "./git";
 import { openRunLog } from "./run-log";
 import { newRunId } from "./run-id";
 import { makeProductionAgentInvoker } from "./agent-invoker-live";
 import { runIterationLoop } from "./iteration-loop";
+import { createWorktreeStrategy } from "./worktree-strategy";
 
 export interface RunProgramTestSeams {
   readonly agentInvokerLayer?: Layer.Layer<AgentInvoker, never, never>;
@@ -32,12 +34,6 @@ export async function runProgram(
       `run() supports only bind-mount sandbox providers in this release; got ${options.sandbox.kind}.`,
     );
   }
-  const branchStrategy = options.branchStrategy ?? { type: "head" };
-  if (branchStrategy.type !== "head") {
-    throw new Error(
-      `run() supports only the "head" branch strategy in this release; got "${branchStrategy.type}".`,
-    );
-  }
 
   const provider = options.sandbox;
   const cwd = resolvePath(options.cwd ?? process.cwd());
@@ -47,7 +43,14 @@ export async function runProgram(
     sandboxEnv: provider.env,
   });
   const targetBranch = await gitCurrentBranch(cwd);
-  const sourceBranch = targetBranch;
+
+  const plan = resolveBranchStrategy({
+    strategy: options.branchStrategy ?? { type: "head" },
+    providerKind: provider.kind,
+    hostBranch: targetBranch,
+  });
+
+  const strategy = await createWorktreeStrategy({ plan, cwd });
 
   const runId = newRunId();
   const runLog = await openRunLog(cwd, runId);
@@ -60,8 +63,13 @@ export async function runProgram(
   const beforeSha = await gitHeadSha(cwd);
 
   let handle: BindMountSandboxHandle | undefined;
+  let resultBase: RunResult | undefined;
+
   try {
-    handle = await provider.create({ worktreePath: cwd, env });
+    handle = await provider.create({
+      worktreePath: strategy.worktreePath,
+      env,
+    });
 
     const agentInvokerLayer =
       seams.agentInvokerLayer ??
@@ -80,18 +88,19 @@ export async function runProgram(
       runIterationLoop({
         prompt: options.prompt,
         runLog,
-        cwd,
+        cwd: strategy.worktreePath,
         beforeSha,
       }).pipe(Effect.provide(agentInvokerLayer)),
     );
 
-    await runLog.runEnded("ok");
+    await strategy.afterIteration();
+    const commits = await gitNewCommits(cwd, beforeSha);
 
-    return {
-      sourceBranch,
-      targetBranch,
+    resultBase = {
+      sourceBranch: strategy.sourceBranch,
+      targetBranch: strategy.targetBranch,
       iterations: loopResult.iterations,
-      commits: loopResult.commits,
+      commits,
       stdout: loopResult.stdout,
       logFilePath: runLog.path,
     };
@@ -100,17 +109,33 @@ export async function runProgram(
       "error",
       error instanceof Error ? error.message : String(error),
     );
-    throw error;
-  } finally {
-    if (handle) {
-      try {
-        await handle.close();
-      } catch (closeError) {
-        process.stderr.write(
-          `sanddune: sandbox teardown failed: ${closeError instanceof Error ? closeError.message : String(closeError)}\n`,
-        );
-      }
-    }
+    await closeHandleSafely(handle);
+    await strategy.close();
     await runLog.close();
+    throw error;
+  }
+
+  await closeHandleSafely(handle);
+  await runLog.runEnded("ok");
+  const { preservedPath } = await strategy.close();
+  await runLog.close();
+
+  return preservedPath !== undefined
+    ? { ...resultBase, worktreePath: preservedPath }
+    : resultBase;
+}
+
+async function closeHandleSafely(
+  handle: BindMountSandboxHandle | undefined,
+): Promise<void> {
+  if (!handle) return;
+  try {
+    await handle.close();
+  } catch (closeError) {
+    process.stderr.write(
+      `sanddune: sandbox teardown failed: ${
+        closeError instanceof Error ? closeError.message : String(closeError)
+      }\n`,
+    );
   }
 }

@@ -11,6 +11,12 @@ export type {
   NonHeadBranchStrategy,
 } from "./branch-strategy";
 
+export { resolveBranchStrategy } from "./resolve-branch-strategy";
+export type {
+  ResolveBranchStrategyInput,
+  WorktreePlan,
+} from "./resolve-branch-strategy";
+
 export type {
   AgentInvokeInput,
   AgentInvokeResult,
