@@ -36,17 +36,38 @@ set -a && source .sanddune/.env && set +a
 
 ## 4. Run sanddune
 
+There are two runnable demos, one per shipped **branch strategy**. Demo files
+follow `<sandbox>-<strategy>-<agent>.ts` so a glance at the filename tells you
+which combination it exercises.
+
+### Head (default)
+
 ```bash
-bun .sanddune/main.ts
+bun .sanddune/docker-head-claude-code.ts
 ```
 
 The script:
 
 - spins up a container from `sanddune:sanddune` with the repo bind-mounted at `/workspace`
 - streams the run log to `.sanddune/logs/<run-id>.jsonl` and prints a `tail -f` hint
-- runs Claude Code for one iteration writing directly to your working tree (head branch strategy)
+- runs Claude Code for one iteration writing directly to your working tree (**head** branch strategy)
 - tears the container down on exit
 - prints the resulting branches, iteration count, and commit SHAs
+
+### Merge-to-head
+
+```bash
+bun .sanddune/docker-merge-to-head-claude-code.ts
+```
+
+The script:
+
+- creates a git **worktree** under `.sanddune/worktrees/<id>/` and a lock under `.sanddune/locks/<id>.lock`
+- bind-mounts that worktree (not the host repo) into the container, so the host working tree stays untouched mid-run — try `git status` from another terminal during the run to see this
+- runs Claude Code for one iteration on a temporary `sanddune/merge-to-head/<id>` source branch
+- fast-forwards the source branch back to the host's active branch on success, so the agent's commits land in your host HEAD
+- removes the worktree and deletes the temp branch on a clean close; preserves both on disk if the agent left uncommitted work and surfaces the path on `RunResult.worktreePath`
+- prints `host HEAD before` / `host HEAD after` so you can see the merge happened
 
 In another terminal you can follow the JSONL stream:
 
@@ -58,14 +79,15 @@ tail -f .sanddune/logs/*.jsonl
 
 ```bash
 git log -1
-ls HELLO.md
+ls HELLO.md                  # after docker-head-claude-code.ts
+ls MERGE-TO-HEAD-HELLO.md    # after docker-merge-to-head-claude-code.ts
 ```
 
-If you want to roll the change back:
+If you want to roll either change back:
 
 ```bash
 git reset --hard HEAD~1
-rm -f HELLO.md
+rm -f HELLO.md MERGE-TO-HEAD-HELLO.md
 ```
 
 ## Custom image name

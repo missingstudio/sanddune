@@ -1,12 +1,12 @@
-import { spawn } from "node:child_process";
+import { runGit } from "./git-spawn";
 
 export async function gitCurrentBranch(cwd: string): Promise<string> {
-  const result = await runGit(["rev-parse", "--abbrev-ref", "HEAD"], cwd);
+  const result = await runGit(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]);
   return result.stdout.trim();
 }
 
 export async function gitHeadSha(cwd: string): Promise<string> {
-  const result = await runGit(["rev-parse", "HEAD"], cwd);
+  const result = await runGit(cwd, ["rev-parse", "HEAD"]);
   return result.stdout.trim();
 }
 
@@ -14,42 +14,33 @@ export async function gitNewCommits(
   cwd: string,
   beforeSha: string,
 ): Promise<readonly string[]> {
-  const result = await runGit(
-    ["log", `${beforeSha}..HEAD`, "--format=%H", "--reverse"],
-    cwd,
-  );
+  const result = await runGit(cwd, [
+    "log",
+    `${beforeSha}..HEAD`,
+    "--format=%H",
+    "--reverse",
+  ]);
   return result.stdout
     .split("\n")
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
 }
 
-interface ProcessResult {
-  readonly stdout: string;
-  readonly stderr: string;
-  readonly exitCode: number;
+export async function gitMerge(cwd: string, sourceBranch: string): Promise<void> {
+  // Prefer fast-forward — keeps the SHAs from the source branch unchanged on
+  // the target branch. If the host moved during the run (rare), fall back to
+  // a regular merge commit using the user's existing git identity so the
+  // agent's work isn't lost.
+  try {
+    await runGit(cwd, ["merge", "--ff-only", sourceBranch]);
+  } catch {
+    await runGit(cwd, ["merge", "--no-ff", "--no-edit", sourceBranch]);
+  }
 }
 
-function runGit(args: readonly string[], cwd: string): Promise<ProcessResult> {
-  return new Promise((resolve, reject) => {
-    const proc = spawn("git", args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
-    const stdoutChunks: Buffer[] = [];
-    const stderrChunks: Buffer[] = [];
-    proc.stdout?.on("data", (c: Buffer) => stdoutChunks.push(c));
-    proc.stderr?.on("data", (c: Buffer) => stderrChunks.push(c));
-    proc.on("error", reject);
-    proc.on("close", (code) => {
-      const stdout = Buffer.concat(stdoutChunks).toString("utf8");
-      const stderr = Buffer.concat(stderrChunks).toString("utf8");
-      if (code !== 0) {
-        reject(
-          new Error(
-            `git ${args.join(" ")} failed (exit ${code}): ${stderr.trim()}`,
-          ),
-        );
-        return;
-      }
-      resolve({ stdout, stderr, exitCode: code });
-    });
-  });
+export async function gitBranchDelete(
+  cwd: string,
+  branch: string,
+): Promise<void> {
+  await runGit(cwd, ["branch", "-D", branch]);
 }

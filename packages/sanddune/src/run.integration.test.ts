@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -122,6 +123,160 @@ describe("runProgram (integration)", () => {
         },
       ),
     ).rejects.toThrow(/boom/);
+
+    expect(closeCalls).toEqual([1]);
+  });
+
+  test("merge-to-head: agent commits land on host HEAD after merge-back", async () => {
+    const closeCalls: number[] = [];
+    const provider = makeLocalProcessBindMountProvider(closeCalls);
+    const agent = createAgentProvider({
+      name: "stub",
+      buildCommand: () => "true",
+      parseLine: () => [],
+    });
+
+    const handleRef: { current: BindMountSandboxHandle | undefined } = {
+      current: undefined,
+    };
+    const fakeInvoker: AgentInvokerService = {
+      invoke: ({ iteration }) =>
+        Effect.tryPromise({
+          try: async () => {
+            const handle = handleRef.current;
+            if (!handle) throw new Error("handle not yet captured");
+            await handle.exec(
+              "printf 'agent-edit\\n' > agent.txt && git add agent.txt && git -c user.email=agent@example.com -c user.name=agent -c commit.gpgsign=false commit -m 'agent edit'",
+            );
+            return {
+              events: [
+                {
+                  type: "text" as const,
+                  content: "did the thing\n",
+                  iteration,
+                  timestamp: Date.now(),
+                },
+              ],
+            };
+          },
+          catch: (e) => (e instanceof Error ? e : new Error(String(e))),
+        }),
+    };
+
+    const headBeforeRun = runSync("git", ["rev-parse", "HEAD"], repo).stdout
+      .trim();
+
+    const options: RunOptions<RunSandboxProvider> = {
+      agent,
+      sandbox: capturingProvider(provider, handleRef),
+      prompt: "do the thing",
+      cwd: repo,
+      branchStrategy: { type: "merge-to-head" },
+    };
+
+    const result = await runProgram(options, {
+      agentInvokerLayer: Layer.succeed(AgentInvoker, fakeInvoker),
+    });
+
+    // Host HEAD now points at the agent's commit, fast-forwarded from the
+    // temp source branch.
+    expect(result.commits).toHaveLength(1);
+    const headAfter = runSync("git", ["rev-parse", "HEAD"], repo).stdout.trim();
+    expect(result.commits[0]).toBe(headAfter);
+    expect(headAfter).not.toBe(headBeforeRun);
+
+    // sourceBranch is the temp branch the manager created; targetBranch is
+    // the host's branch at run() time.
+    expect(result.sourceBranch).toMatch(/^sanddune\/merge-to-head\//);
+    expect(result.targetBranch).toBe("main");
+
+    // Clean worktree was removed; no preservation surface on the result.
+    expect(result.worktreePath).toBeUndefined();
+    expect(existsSync(join(repo, ".sanddune", "worktrees"))).toBe(true);
+    const dirEntries = runSync("ls", [join(repo, ".sanddune", "worktrees")], repo)
+      .stdout.trim();
+    expect(dirEntries).toBe("");
+
+    // Lock released.
+    const lockEntries = runSync("ls", [join(repo, ".sanddune", "locks")], repo)
+      .stdout.trim();
+    expect(lockEntries).toBe("");
+
+    // Temp source branch was deleted after a successful merge.
+    const branchList = runSync("git", ["branch", "--list"], repo).stdout;
+    expect(branchList).not.toMatch(/sanddune\/merge-to-head\//);
+
+    // Sandbox close ran exactly once.
+    expect(closeCalls).toEqual([1]);
+  });
+
+  test("merge-to-head: dirty worktree is preserved and surfaced on RunResult.worktreePath", async () => {
+    const closeCalls: number[] = [];
+    const provider = makeLocalProcessBindMountProvider(closeCalls);
+    const agent = createAgentProvider({
+      name: "stub",
+      buildCommand: () => "true",
+      parseLine: () => [],
+    });
+
+    const handleRef: { current: BindMountSandboxHandle | undefined } = {
+      current: undefined,
+    };
+    const fakeInvoker: AgentInvokerService = {
+      invoke: ({ iteration }) =>
+        Effect.tryPromise({
+          try: async () => {
+            const handle = handleRef.current;
+            if (!handle) throw new Error("handle not yet captured");
+            // Commit one file (so the merge has something to fast-forward),
+            // then leave a second file uncommitted to make the worktree dirty.
+            await handle.exec(
+              "printf 'committed\\n' > committed.txt && git add committed.txt && git -c user.email=agent@example.com -c user.name=agent -c commit.gpgsign=false commit -m 'committed' && printf 'leftover\\n' > leftover.txt",
+            );
+            return {
+              events: [
+                {
+                  type: "text" as const,
+                  content: "left work behind\n",
+                  iteration,
+                  timestamp: Date.now(),
+                },
+              ],
+            };
+          },
+          catch: (e) => (e instanceof Error ? e : new Error(String(e))),
+        }),
+    };
+
+    const options: RunOptions<RunSandboxProvider> = {
+      agent,
+      sandbox: capturingProvider(provider, handleRef),
+      prompt: "leave a mess",
+      cwd: repo,
+      branchStrategy: { type: "merge-to-head" },
+    };
+
+    const result = await runProgram(options, {
+      agentInvokerLayer: Layer.succeed(AgentInvoker, fakeInvoker),
+    });
+
+    // The committed change still merged back to host HEAD.
+    expect(result.commits).toHaveLength(1);
+
+    // Worktree was preserved on disk; result surfaces the path.
+    expect(result.worktreePath).toBeDefined();
+    expect(existsSync(result.worktreePath!)).toBe(true);
+    expect(existsSync(join(result.worktreePath!, "leftover.txt"))).toBe(true);
+
+    // Lock released even though the worktree is preserved.
+    const lockEntries = runSync("ls", [join(repo, ".sanddune", "locks")], repo)
+      .stdout.trim();
+    expect(lockEntries).toBe("");
+
+    // Temp source branch is preserved (not deleted) so the user can recover
+    // the leftover work.
+    const branchList = runSync("git", ["branch", "--list"], repo).stdout;
+    expect(branchList).toMatch(/sanddune\/merge-to-head\//);
 
     expect(closeCalls).toEqual([1]);
   });
