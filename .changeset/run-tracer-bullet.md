@@ -11,7 +11,8 @@ This release fills in:
 - **`claudeCode()` agent provider**: builds the per-iteration `claude --print --output-format stream-json --verbose` command and parses streamed JSONL into `text` / `toolCall` agent stream events. Exposed as a top-level export from `@missingstudio/sanddune`.
 - **Production wiring for the `AgentInvoker` Effect `Context.Tag`** that shells out to the agent provider through the sandbox handle.
 - **Env resolver**: `process.env` ∪ agent-provider `env` ∪ sandbox-provider `env`, passed verbatim into the container. Overlapping keys between agent and sandbox provider env throw at launch.
-- **Log-to-file mode** writes a structured JSONL run log to `.sanddune/logs/<run-id>.jsonl` and prints a `tail -f` hint when the run starts.
+- **Log-to-file mode** writes a structured JSONL run log to `.sanddune/logs/<run-id>.jsonl` and prints a `tail -f` hint when the run starts. Writes are serialized internally so concurrent log records cannot interleave bytes.
+- **`RunResult`** now carries `stdout` (the agent's text output, concatenated across iterations) and `logFilePath` (the absolute path of the run log). The internal **iteration loop** that produces these is carved out as its own Effect-shaped module, consuming the `AgentInvoker` `Context.Tag` from Effect — the same seam the `Sandbox.run()` and `Worktree.run()` slices will reuse.
 
 Out of scope for this slice (each lands in a later one): the `merge-to-head` and `branch` strategies, `promptFile` / `{{KEY}}` substitution / shell expansion, lifecycle hooks, multi-iteration loops, completion-signal matching, idle / abort threading, terminal logging mode, `onAgentStreamEvent`, agent session capture, the Podman / Vercel / no-sandbox providers, and the CLI.
 

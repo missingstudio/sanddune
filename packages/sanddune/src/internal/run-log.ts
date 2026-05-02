@@ -13,7 +13,7 @@ export type RunLogRecord =
     readonly type: "iteration-end";
     readonly iteration: number;
     readonly timestamp: number;
-    readonly commitSha?: string;
+    readonly commitSha: string | null;
   }
   | {
     readonly type: "agent-event";
@@ -28,7 +28,11 @@ export type RunLogRecord =
 
 export interface RunLog {
   readonly path: string;
-  write(record: RunLogRecord): Promise<void>;
+  runStarted(): Promise<void>;
+  iterationStarted(iteration: number): Promise<void>;
+  iterationEnded(iteration: number, commitSha: string | null): Promise<void>;
+  agentEvent(event: AgentStreamEvent): Promise<void>;
+  runEnded(status: "ok" | "error", error?: string): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -41,18 +45,53 @@ export async function openRunLog(
 
   const handle: FileHandle = await open(path, "a");
   let closed = false;
+  let pending: Promise<void> = Promise.resolve();
+
+  const enqueue = (record: RunLogRecord): Promise<void> => {
+    pending = pending.then(async () => {
+      if (closed) return;
+      await handle.write(JSON.stringify(record) + "\n");
+    });
+    return pending;
+  };
+
   return {
     path,
 
-    write: async (record: RunLogRecord) => {
-      if (closed) return;
-      await handle.write(JSON.stringify(record) + "\n");
-    },
+    runStarted: () => enqueue({ type: "run-start", timestamp: Date.now() }),
+
+    iterationStarted: (iteration) =>
+      enqueue({
+        type: "iteration-start",
+        iteration,
+        timestamp: Date.now(),
+      }),
+
+    iterationEnded: (iteration, commitSha) =>
+      enqueue({
+        type: "iteration-end",
+        iteration,
+        timestamp: Date.now(),
+        commitSha,
+      }),
+
+    agentEvent: (event) => enqueue({ type: "agent-event", event }),
+
+    runEnded: (status, error) =>
+      enqueue(
+        error !== undefined
+          ? { type: "run-end", timestamp: Date.now(), status, error }
+          : { type: "run-end", timestamp: Date.now(), status },
+      ),
 
     close: async () => {
       if (closed) return;
       closed = true;
-      await handle.close();
+      try {
+        await pending;
+      } finally {
+        await handle.close();
+      }
     },
   };
 }

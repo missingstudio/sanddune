@@ -3,12 +3,13 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
 import {
-  createAgentProvider,
-  createBindMountSandboxProvider,
+  AgentInvoker,
   type AgentInvokerService,
   type BindMountSandboxHandle,
+  createAgentProvider,
+  createBindMountSandboxProvider,
   type RunOptions,
   type RunSandboxProvider,
 } from "@missingstudio/sanddune-core";
@@ -42,27 +43,44 @@ describe("runProgram (integration)", () => {
     });
 
     const invokerCalls: number[] = [];
-    const buildInvoker = (deps: {
-      handle: BindMountSandboxHandle;
-    }): AgentInvokerService => ({
+    const handleRef: { current: BindMountSandboxHandle | undefined } = {
+      current: undefined,
+    };
+    const fakeInvoker: AgentInvokerService = {
       invoke: ({ iteration }) =>
-        Effect.tryPromise(async () => {
-          invokerCalls.push(iteration);
-          await deps.handle.exec(
-            "printf 'agent-edit\\n' > agent.txt && git add agent.txt && git -c user.email=agent@example.com -c user.name=agent -c commit.gpgsign=false commit -m 'agent edit'",
-          );
-          return { events: [] };
+        Effect.tryPromise({
+          try: async () => {
+            invokerCalls.push(iteration);
+            const handle = handleRef.current;
+            if (!handle) throw new Error("handle not yet captured");
+            await handle.exec(
+              "printf 'agent-edit\\n' > agent.txt && git add agent.txt && git -c user.email=agent@example.com -c user.name=agent -c commit.gpgsign=false commit -m 'agent edit'",
+            );
+            return {
+              events: [
+                {
+                  type: "text" as const,
+                  content: "did the thing\n",
+                  iteration,
+                  timestamp: Date.now(),
+                },
+              ],
+            };
+          },
+          catch: (e) => (e instanceof Error ? e : new Error(String(e))),
         }),
-    });
+    };
 
     const options: RunOptions<RunSandboxProvider> = {
       agent,
-      sandbox: provider,
+      sandbox: capturingProvider(provider, handleRef),
       prompt: "do the thing",
       cwd: repo,
     };
 
-    const result = await runProgram(options, buildInvoker);
+    const result = await runProgram(options, {
+      agentInvokerLayer: Layer.succeed(AgentInvoker, fakeInvoker),
+    });
 
     expect(invokerCalls).toEqual([1]);
     expect(result.iterations).toHaveLength(1);
@@ -70,6 +88,8 @@ describe("runProgram (integration)", () => {
     expect(result.iterations[0]?.commitSha).toBe(result.commits[0]);
     expect(result.sourceBranch).toBe("main");
     expect(result.targetBranch).toBe("main");
+    expect(result.stdout).toBe("did the thing\n");
+    expect(result.logFilePath).toMatch(/\.sanddune\/logs\/.+\.jsonl$/);
     expect(closeCalls).toEqual([1]);
 
     const headSha = runSync("git", ["rev-parse", "HEAD"], repo).stdout.trim();
@@ -85,9 +105,9 @@ describe("runProgram (integration)", () => {
       parseLine: () => [],
     });
 
-    const buildInvoker = (): AgentInvokerService => ({
+    const fakeInvoker: AgentInvokerService = {
       invoke: () => Effect.fail(new Error("boom")),
-    });
+    };
 
     await expect(
       runProgram(
@@ -97,7 +117,9 @@ describe("runProgram (integration)", () => {
           prompt: "x",
           cwd: repo,
         },
-        buildInvoker,
+        {
+          agentInvokerLayer: Layer.succeed(AgentInvoker, fakeInvoker),
+        },
       ),
     ).rejects.toThrow(/boom/);
 
@@ -119,6 +141,10 @@ describe("runProgram (integration)", () => {
       parseLine: () => [],
     });
 
+    const fakeInvoker: AgentInvokerService = {
+      invoke: () => Effect.succeed({ events: [] }),
+    };
+
     await expect(
       runProgram(
         {
@@ -127,9 +153,9 @@ describe("runProgram (integration)", () => {
           prompt: "x",
           cwd: repo,
         },
-        () => ({
-          invoke: () => Effect.succeed({ events: [] }),
-        }),
+        {
+          agentInvokerLayer: Layer.succeed(AgentInvoker, fakeInvoker),
+        },
       ),
     ).rejects.toThrow(/SHARED_KEY/);
   });
@@ -161,6 +187,21 @@ function makeLocalProcessBindMountProvider(closeCalls: number[]) {
         closeCalls.push(1);
       },
     }),
+  });
+}
+
+function capturingProvider(
+  inner: ReturnType<typeof createBindMountSandboxProvider>,
+  handleRef: { current: BindMountSandboxHandle | undefined },
+): ReturnType<typeof createBindMountSandboxProvider> {
+  return createBindMountSandboxProvider({
+    name: inner.name,
+    env: inner.env,
+    create: async (options) => {
+      const handle = await inner.create(options);
+      handleRef.current = handle;
+      return handle;
+    },
   });
 }
 
