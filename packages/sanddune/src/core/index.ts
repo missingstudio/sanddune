@@ -70,6 +70,7 @@ export type {
   CloseResult,
   CreateSandboxOptions,
   Sandbox,
+  SandboxInteractiveOptions,
   SandboxRunOptions,
 } from "./sandbox";
 

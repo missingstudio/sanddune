@@ -10,6 +10,7 @@ import type {
   IsolatedSandboxProvider,
   NoSandboxProvider,
 } from "./core";
+import type { Sandbox } from "./core";
 import {
   createSandbox,
   createWorktree,
@@ -101,6 +102,11 @@ function _typeChecks() {
     prompt: "x",
     branchStrategy: { type: "branch", branch: "feat/x" },
   });
+
+  const sandboxStub = null as unknown as Sandbox;
+
+  // @ts-expect-error sandbox.run() rejects resumeSession at the type level
+  void sandboxStub.run({ prompt: "x", resumeSession: "abc" });
 }
 
 void _typeChecks;
