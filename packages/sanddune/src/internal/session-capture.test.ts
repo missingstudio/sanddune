@@ -231,10 +231,12 @@ describe("makeCaptureSessionFn", () => {
     });
     expect(fn).toBeDefined();
 
-    const hostPath = await fn!({ iteration: 1, sessionId: "abc" });
+    const captured = await fn!({ iteration: 1, sessionId: "abc" });
 
     const expectedPath = `${dir}/sessions/abc.jsonl`;
-    expect(hostPath).toBe(expectedPath);
+    expect(captured?.hostPath).toBe(expectedPath);
+    // No parseUsage on the fake capture → usage stays undefined.
+    expect(captured?.usage).toBeUndefined();
     expect(calls).toHaveLength(1);
     expect(calls[0]!.command).toBe("cat /sb/abc.jsonl");
 
@@ -242,6 +244,42 @@ describe("makeCaptureSessionFn", () => {
     // cwd rewritten sandbox → host
     expect(written).toContain(`"cwd":"/host"`);
     expect(written).not.toContain(`"cwd":"/workspace"`);
+  });
+
+  test("usage is forwarded when the agent's parseUsage returns a value", async () => {
+    const captureWithUsage: AgentSessionCapture = {
+      ...makeFakeCapture({ hostBase: dir, sandboxBase: "/sb" }),
+      parseUsage: () => ({
+        inputTokens: 100,
+        outputTokens: 50,
+        cacheCreationInputTokens: 10,
+        cacheReadInputTokens: 5,
+      }),
+    };
+    const { handle } = makeFakeHandle({
+      onExec: async (command) => {
+        if (command.startsWith("cat ")) {
+          return {
+            stdout: `{"type":"assistant","cwd":"/workspace"}\n`,
+            stderr: "",
+            exitCode: 0,
+          };
+        }
+        return { stdout: "", stderr: "", exitCode: 0 };
+      },
+    });
+    const fn = makeCaptureSessionFn({
+      handle,
+      agent: fakeAgent(captureWithUsage),
+      hostCwd: "/host",
+    });
+    const captured = await fn!({ iteration: 1, sessionId: "abc" });
+    expect(captured?.usage).toEqual({
+      inputTokens: 100,
+      outputTokens: 50,
+      cacheCreationInputTokens: 10,
+      cacheReadInputTokens: 5,
+    });
   });
 
   test("read failure → returns undefined, run still proceeds (best-effort capture)", async () => {
@@ -259,3 +297,5 @@ describe("makeCaptureSessionFn", () => {
     expect(result).toBeUndefined();
   });
 });
+
+

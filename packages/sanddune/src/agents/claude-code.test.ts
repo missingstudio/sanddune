@@ -118,6 +118,107 @@ describe("claudeCode sessionCapture path encoding", () => {
   });
 });
 
+describe("claudeCode sessionCapture.parseUsage", () => {
+  const capture = claudeCode("m").sessionCapture!;
+
+  test("extracts raw token counts from the assistant message's usage field", () => {
+    const jsonl =
+      JSON.stringify({ type: "system", subtype: "init", session_id: "x" }) +
+      "\n" +
+      JSON.stringify({
+        type: "assistant",
+        message: {
+          content: [{ type: "text", text: "hi" }],
+          usage: {
+            input_tokens: 1234,
+            output_tokens: 56,
+            cache_creation_input_tokens: 78,
+            cache_read_input_tokens: 90,
+          },
+        },
+      }) +
+      "\n";
+    expect(capture.parseUsage!(jsonl)).toEqual({
+      inputTokens: 1234,
+      outputTokens: 56,
+      cacheCreationInputTokens: 78,
+      cacheReadInputTokens: 90,
+    });
+  });
+
+  test("uses the LAST assistant message's usage (cumulative for the iteration)", () => {
+    const earlier = JSON.stringify({
+      type: "assistant",
+      message: {
+        content: [],
+        usage: { input_tokens: 1, output_tokens: 1 },
+      },
+    });
+    const later = JSON.stringify({
+      type: "assistant",
+      message: {
+        content: [],
+        usage: { input_tokens: 999, output_tokens: 42 },
+      },
+    });
+    const jsonl = `${earlier}\n${later}\n`;
+    expect(capture.parseUsage!(jsonl)).toEqual({
+      inputTokens: 999,
+      outputTokens: 42,
+    });
+  });
+
+  test("cache fields are omitted when absent — only required fields surface", () => {
+    const jsonl =
+      JSON.stringify({
+        type: "assistant",
+        message: { content: [], usage: { input_tokens: 5, output_tokens: 7 } },
+      }) + "\n";
+    expect(capture.parseUsage!(jsonl)).toEqual({
+      inputTokens: 5,
+      outputTokens: 7,
+    });
+  });
+
+  test("returns undefined when the JSONL has no assistant message with usage", () => {
+    const jsonl =
+      JSON.stringify({ type: "system", subtype: "init", session_id: "x" }) +
+      "\n" +
+      JSON.stringify({ type: "user", message: { content: "go" } }) +
+      "\n";
+    expect(capture.parseUsage!(jsonl)).toBeUndefined();
+  });
+
+  test("returns undefined for empty / whitespace-only input", () => {
+    expect(capture.parseUsage!("")).toBeUndefined();
+    expect(capture.parseUsage!("\n\n")).toBeUndefined();
+  });
+
+  test("malformed lines are skipped, valid ones still parsed", () => {
+    const jsonl =
+      "not json\n" +
+      JSON.stringify({
+        type: "assistant",
+        message: { content: [], usage: { input_tokens: 11, output_tokens: 2 } },
+      }) +
+      "\n" +
+      "{\n";
+    expect(capture.parseUsage!(jsonl)).toEqual({
+      inputTokens: 11,
+      outputTokens: 2,
+    });
+  });
+
+  test("returns undefined when input_tokens / output_tokens are missing", () => {
+    const jsonl =
+      JSON.stringify({
+        type: "assistant",
+        message: { content: [], usage: { cache_read_input_tokens: 5 } },
+      }) + "\n";
+    expect(capture.parseUsage!(jsonl)).toBeUndefined();
+  });
+});
+
 describe("claudeCode sessionCapture.rewriteCwd", () => {
   const capture = claudeCode("m").sessionCapture!;
 

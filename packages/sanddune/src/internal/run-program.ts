@@ -110,7 +110,11 @@ export async function runProgram(
       );
     }
 
-    session = await openRunSession(cwd);
+    session = await openRunSession({
+      cwd,
+      ...(options.logging !== undefined && { logging: options.logging }),
+      ...(options.name !== undefined && { name: options.name }),
+    });
 
     // Lifecycle (CONTEXT.md): copyToWorktree → host.onWorktreeReady →
     // sandbox created → host.onSandboxReady ∥ sandbox.onSandboxReady.
@@ -170,7 +174,6 @@ export async function runProgram(
         makeProductionAgentInvoker({
           agentProvider: options.agent,
           handle,
-          onEvent: session.recordAgentEvent,
         }),
       );
 
@@ -197,6 +200,7 @@ export async function runProgram(
             resumeSessionId: options.resumeSession,
           }),
         ...(captureSession !== undefined && { captureSession }),
+        onEvent: session.recordAgentEvent,
       }).pipe(Effect.provide(agentInvokerLayer)),
     );
 
@@ -207,7 +211,9 @@ export async function runProgram(
       iterations: loopResult.iterations,
       commits: loopResult.commits,
       stdout: loopResult.stdout,
-      logFilePath: session.logFilePath,
+      ...(session.logFilePath !== undefined && {
+        logFilePath: session.logFilePath,
+      }),
       ...(loopResult.completionSignal !== undefined && {
         completionSignal: loopResult.completionSignal,
       }),

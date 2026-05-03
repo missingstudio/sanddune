@@ -3,6 +3,7 @@ import type {
   AgentProvider,
   AgentSessionCapture,
   AgentStreamEvent,
+  IterationUsage,
 } from "../core";
 
 export interface ClaudeCodeOptions {
@@ -145,7 +146,56 @@ const claudeCodeSessionCapture: AgentSessionCapture = {
       })
       .join("\n");
   },
+  parseUsage(jsonl) {
+    // Walk the file backwards: the last assistant message carries the most
+    // recent (cumulative) usage counts for the iteration.
+    const lines = jsonl.split("\n");
+    for (let i = lines.length - 1; i >= 0; i -= 1) {
+      const line = lines[i];
+      if (line === undefined || line.length === 0) continue;
+      const usage = extractUsageFromAssistantLine(line);
+      if (usage !== undefined) return usage;
+    }
+    return undefined;
+  },
 };
+
+function extractUsageFromAssistantLine(line: string): IterationUsage | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    return undefined;
+  }
+  if (!isRecord(parsed)) return undefined;
+  if (parsed["type"] !== "assistant") return undefined;
+  const message = parsed["message"];
+  if (!isRecord(message)) return undefined;
+  const usage = message["usage"];
+  if (!isRecord(usage)) return undefined;
+  const inputTokens = numericField(usage, "input_tokens");
+  const outputTokens = numericField(usage, "output_tokens");
+  if (inputTokens === undefined || outputTokens === undefined) return undefined;
+  const cacheCreationInputTokens = numericField(
+    usage,
+    "cache_creation_input_tokens",
+  );
+  const cacheReadInputTokens = numericField(usage, "cache_read_input_tokens");
+  return {
+    inputTokens,
+    outputTokens,
+    ...(cacheCreationInputTokens !== undefined && { cacheCreationInputTokens }),
+    ...(cacheReadInputTokens !== undefined && { cacheReadInputTokens }),
+  };
+}
+
+function numericField(
+  obj: Record<string, unknown>,
+  key: string,
+): number | undefined {
+  const value = obj[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

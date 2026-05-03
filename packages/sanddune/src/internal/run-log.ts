@@ -40,7 +40,10 @@ export async function openRunLog(
   cwd: string,
   runId: string,
 ): Promise<RunLog> {
-  const path = join(cwd, ".sanddune", "logs", `${runId}.jsonl`);
+  return openRunLogAtPath(join(cwd, ".sanddune", "logs", `${runId}.jsonl`));
+}
+
+export async function openRunLogAtPath(path: string): Promise<RunLog> {
   await mkdir(dirname(path), { recursive: true });
 
   const handle: FileHandle = await open(path, "a");

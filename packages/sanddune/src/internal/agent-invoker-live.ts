@@ -10,10 +10,16 @@ import {
 export function makeProductionAgentInvoker(params: {
   readonly agentProvider: AgentProvider;
   readonly handle: BindMountSandboxHandle;
-  readonly onEvent: (event: AgentStreamEvent) => void;
 }): AgentInvokerService {
   return {
-    invoke: ({ prompt, iteration, signal, idleTimeoutSeconds, resumeSessionId }) =>
+    invoke: ({
+      prompt,
+      iteration,
+      signal,
+      idleTimeoutSeconds,
+      resumeSessionId,
+      onEvent,
+    }) =>
       Effect.tryPromise({
         try: async () => {
           const command = params.agentProvider.buildCommand({
@@ -40,7 +46,7 @@ export function makeProductionAgentInvoker(params: {
                 if (parsed.length > 0) idle.reset();
                 for (const event of parsed) {
                   events.push(event);
-                  params.onEvent(event);
+                  onEvent?.(event);
                 }
               },
             });

@@ -562,7 +562,7 @@ describe("runIterationLoop", () => {
           idleTimeoutSeconds: NEVER_FIRES,
           captureSession: async ({ iteration, sessionId }) => {
             captureCalls.push({ iteration, sessionId });
-            return `/host/sessions/${sessionId}.jsonl`;
+            return { hostPath: `/host/sessions/${sessionId}.jsonl` };
           },
         },
         invoker,
@@ -636,7 +636,7 @@ describe("runIterationLoop", () => {
           idleTimeoutSeconds: NEVER_FIRES,
           captureSession: async () => {
             captureInvoked += 1;
-            return "/should/not/be/used";
+            return { hostPath: "/should/not/be/used" };
           },
         },
         invoker,
