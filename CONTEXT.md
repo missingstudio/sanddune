@@ -128,6 +128,10 @@ _Avoid_: "template expansion", "interpolation", "variable substitution"
 The preprocessing step that evaluates **shell expressions** in a **prompt**, replacing them with their stdout.
 _Avoid_: "prompt preprocessing" (too generic), "command expansion"
 
+**Prompt pipeline**:
+The single owner of the **prompt** lifecycle for one **run session**: validates options, reads the file (template), runs **prompt argument substitution** once on the **host**, and exposes a per-iteration `getPromptForIteration(exec)` thunk that the **iteration loop** calls each turn — for **inline prompts** and templates with no **shell expressions** the thunk returns a frozen string; for templates with shell expressions it runs **prompt expansion** inside the **sandbox**. Constructed via `preparePromptPipeline()`. The **iteration loop** does not know whether the prompt is inline or template — it just calls the thunk.
+_Avoid_: "prompt resolver" (old name, only covered file-read), "prompt preprocessor"
+
 **Shell expression**:
 A `` !`command` `` marker in a **prompt** that evaluates a shell command inside the **sandbox**.
 _Avoid_: "command" (overloaded), "inline command", "prompt command"
@@ -183,6 +187,10 @@ The **agent**'s persisted conversation record. For Claude Code, a `<session-id>.
 _Avoid_: "chat history", "transcript"
 
 ### Display
+
+**Run session**:
+The lifecycle of a single call to `run()` — opens the **run log**, writes `runStarted`, exposes per-iteration logging to the **iteration loop**, fans **agent stream events** into the log, and writes the terminal `runEnded` record + closes the file when the call ends. Owned by the `RunSession` module (`openRunSession`); the **iteration loop** receives only a narrow `IterationLogger` view, not the full session.
+_Avoid_: "run", "run lifecycle" (too vague), "session" alone (ambiguous with **agent session**).
 
 **Log-to-file mode**:
 The display mode where sanddune writes iteration progress and agent output to a **run log**.

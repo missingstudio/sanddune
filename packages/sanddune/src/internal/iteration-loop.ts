@@ -1,36 +1,33 @@
 import { Effect } from "effect";
-import {
-  AgentIdleTimeoutError,
-  AgentInvoker,
-  expandPrompt,
-  type IterationResult,
-  type ResolvedPrompt,
-  type SandboxExec,
-} from "../core";
+import { AgentInvoker, type IterationResult } from "../core";
 import { gitNewCommits } from "./git";
-import type { RunLog } from "./run-log";
+import type { IterationLogger } from "./run-session";
 
 export interface IterationLoopInput {
-  /** Post-`substitutePromptArgs` text. For templates, the loop runs
-   *  `expandPrompt` before each iteration; for inline prompts it is passed
-   *  to the agent verbatim. */
-  readonly prompt: string;
-  readonly promptKind: ResolvedPrompt["kind"];
-  readonly runLog: RunLog;
+  /** Called once per iteration to obtain the **prompt** text the **agent**
+   *  will see. Owned by the **prompt pipeline**; the loop neither inspects
+   *  nor caches the result. For inline prompts and shell-expression-free
+   *  templates the closure is a no-op string return; for templates with
+   *  shell expressions it evaluates them in the live **sandbox**. */
+  readonly getPromptForIteration: () => Promise<string>;
+  /** Narrow per-iteration log surface — the loop does not own the **run
+   *  session** lifecycle; it only emits `iterationStarted` /
+   *  `iterationEnded`. Provided by `RunSession.logger`. */
+  readonly logger: IterationLogger;
   readonly cwd: string;
   readonly beforeSha: string;
   readonly maxIterations: number;
   /** First match across iterations wins; empty array disables detection. */
   readonly completionSignals: readonly string[];
-  /** Per-iteration idle timeout. Resets on every **agent stream event**;
-   *  on expiry the loop synthesizes an abort with `AgentIdleTimeoutError`
-   *  as the reason and the iteration's call to the agent rejects. */
+  /** Per-iteration idle timeout. Forwarded to the **agent invoker**, which
+   *  owns the watchdog and synthesizes an `AgentIdleTimeoutError` abort on
+   *  expiry (ADR-0011). */
   readonly idleTimeoutSeconds: number;
-  readonly sandboxExec: SandboxExec;
-  /** Caller-supplied abort. Checked at iteration boundaries and composed
-   *  with the per-iteration idle signal so a mid-iteration abort kills the
-   *  agent subprocess (via `spawnHost` SIGTERM) and rejects with
-   *  `signal.reason` verbatim (ADR-0004 / ADR-0011). */
+  /** Caller-supplied abort. Checked at iteration boundaries and forwarded
+   *  to the **agent invoker**, which composes it with its internal idle
+   *  signal so a mid-iteration abort kills the agent subprocess (via
+   *  `spawnHost` SIGTERM) and rejects with `signal.reason` verbatim
+   *  (ADR-0004 / ADR-0011). */
   readonly signal?: AbortSignal;
 }
 
@@ -58,32 +55,18 @@ export const runIterationLoop = (
         return yield* Effect.fail(aborted);
       }
 
-      let promptForIteration = input.prompt;
-      if (input.promptKind === "template") {
-        const expanded = yield* fromPromise(() =>
-          expandPrompt({ text: input.prompt, exec: input.sandboxExec }),
-        );
-        promptForIteration = expanded.text;
-      }
+      const promptForIteration = yield* fromPromise(() =>
+        input.getPromptForIteration(),
+      );
 
-      yield* fromPromise(() => input.runLog.iterationStarted(iteration));
+      yield* fromPromise(() => input.logger.iterationStarted(iteration));
 
-      const idle = startIdleTimer({
-        idleTimeoutSeconds: input.idleTimeoutSeconds,
+      const result = yield* invoker.invoke({
+        prompt: promptForIteration,
         iteration,
+        idleTimeoutSeconds: input.idleTimeoutSeconds,
+        ...(input.signal !== undefined && { signal: input.signal }),
       });
-      const composite =
-        input.signal !== undefined
-          ? AbortSignal.any([input.signal, idle.signal])
-          : idle.signal;
-      const result = yield* invoker
-        .invoke({
-          prompt: promptForIteration,
-          iteration,
-          signal: composite,
-          onEvent: () => idle.reset(),
-        })
-        .pipe(Effect.ensuring(Effect.sync(() => idle.dispose())));
 
       let signalMatched: string | undefined;
       for (const event of result.events) {
@@ -109,7 +92,7 @@ export const runIterationLoop = (
       if (lastCommit !== null) lastSha = lastCommit;
 
       yield* fromPromise(() =>
-        input.runLog.iterationEnded(iteration, lastCommit),
+        input.logger.iterationEnded(iteration, lastCommit),
       );
 
       iterations.push({
@@ -146,50 +129,4 @@ function abortReason(signal: AbortSignal | undefined): Error | undefined {
   const reason = signal.reason;
   if (reason instanceof Error) return reason;
   return new Error(typeof reason === "string" ? reason : "aborted");
-}
-
-interface IdleTimer {
-  readonly signal: AbortSignal;
-  reset(): void;
-  dispose(): void;
-}
-
-function startIdleTimer(params: {
-  readonly idleTimeoutSeconds: number;
-  readonly iteration: number;
-}): IdleTimer {
-  const controller = new AbortController();
-  const ms = params.idleTimeoutSeconds * 1000;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  let disposed = false;
-
-  const arm = () => {
-    if (disposed) return;
-    timer = setTimeout(() => {
-      controller.abort(
-        new AgentIdleTimeoutError({
-          idleTimeoutSeconds: params.idleTimeoutSeconds,
-          iteration: params.iteration,
-        }),
-      );
-    }, ms);
-  };
-
-  arm();
-
-  return {
-    signal: controller.signal,
-    reset: () => {
-      if (disposed) return;
-      if (timer !== undefined) clearTimeout(timer);
-      arm();
-    },
-    dispose: () => {
-      disposed = true;
-      if (timer !== undefined) {
-        clearTimeout(timer);
-        timer = undefined;
-      }
-    },
-  };
 }

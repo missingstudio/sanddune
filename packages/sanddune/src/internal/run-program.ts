@@ -2,8 +2,7 @@ import { Effect, Layer } from "effect";
 import { join, resolve as resolvePath } from "node:path";
 import {
   AgentInvoker,
-  resolvePrompt,
-  substitutePromptArgs,
+  preparePromptPipeline,
   type BindMountSandboxHandle,
   type RunOptions,
   type RunResult,
@@ -11,11 +10,10 @@ import {
 } from "../core";
 import { resolveEnv } from "./env-resolver";
 import { gitCurrentBranch, gitHeadSha } from "./git";
-import { openRunLog } from "./run-log";
-import { newRunId } from "./run-id";
 import { makeProductionAgentInvoker } from "./agent-invoker-live";
 import { runIterationLoop } from "./iteration-loop";
 import { runEffect } from "./run-effect";
+import { openRunSession, type RunSession } from "./run-session";
 import { createWorktreeStrategy } from "./worktree-strategy";
 
 /** Set to 1 so existing single-iteration callers don't get a cost multiplier
@@ -34,7 +32,6 @@ export async function runProgram(
   options: RunOptions<RunSandboxProvider>,
   seams: RunProgramTestSeams = {},
 ): Promise<RunResult> {
-  const resolvedPrompt = await resolvePrompt(options);
   if (options.sandbox.kind !== "bind-mount") {
     throw new Error(
       `run() supports only bind-mount sandbox providers in this release; got ${options.sandbox.kind}.`,
@@ -59,35 +56,34 @@ export async function runProgram(
     hostBranch: targetBranch,
   });
 
-  let runLog: Awaited<ReturnType<typeof openRunLog>> | undefined;
+  // Single try/finally owns teardown for: prompt-pipeline failures, sandbox
+  // handle, run session, and the worktree strategy. Both success and error
+  // paths go through the same teardown sequence — adding a new managed
+  // resource means one place, not two.
+  let runError: Error | undefined;
+  let session: RunSession | undefined;
   let handle: BindMountSandboxHandle | undefined;
   let resultBase: RunResult | undefined;
+  let preservedPath: string | undefined;
 
   try {
-    let promptText = resolvedPrompt.text;
-    if (resolvedPrompt.kind === "template") {
-      const substituted = substitutePromptArgs({
-        text: resolvedPrompt.text,
-        promptArgs: resolvedPrompt.promptArgs,
-        sourceBranch: strategy.sourceBranch,
-        targetBranch: strategy.targetBranch,
-      });
-      promptText = substituted.text;
-      for (const key of substituted.unusedKeys) {
-        process.stderr.write(
-          `sanddune: warning — promptArgs.${key} was not used by the template\n`,
-        );
-      }
+    // Validates options + reads/substitutes the template on the host before
+    // the sandbox is created, so file-not-found / bad placeholders fail fast
+    // (and route through the worktree teardown in the finally block).
+    const promptPipeline = await preparePromptPipeline({
+      prompt: options.prompt,
+      promptFile: options.promptFile,
+      promptArgs: options.promptArgs,
+      sourceBranch: strategy.sourceBranch,
+      targetBranch: strategy.targetBranch,
+    });
+    for (const key of promptPipeline.unusedPromptArgKeys) {
+      process.stderr.write(
+        `sanddune: warning — promptArgs.${key} was not used by the template\n`,
+      );
     }
 
-    const runId = newRunId();
-    const log = await openRunLog(cwd, runId);
-    runLog = log;
-    process.stdout.write(
-      `sanddune: streaming run log to ${log.path}\n  tail -f ${log.path}\n`,
-    );
-
-    await log.runStarted();
+    session = await openRunSession(cwd);
 
     // Anything past this SHA on the worktree's HEAD after the loop is the
     // agent's contribution.
@@ -106,63 +102,66 @@ export async function runProgram(
         makeProductionAgentInvoker({
           agentProvider: options.agent,
           handle,
-          onEvent: (event) => {
-            void log.agentEvent(event);
-          },
+          onEvent: session.recordAgentEvent,
         }),
       );
 
     const loopResult = await runEffect(
       runIterationLoop({
-        prompt: promptText,
-        promptKind: resolvedPrompt.kind,
-        runLog: log,
+        getPromptForIteration: () =>
+          promptPipeline.getPromptForIteration((cmd) => handle!.exec(cmd)),
+        logger: session.logger,
         cwd: strategy.worktreePath,
         beforeSha,
         maxIterations: options.maxIterations ?? DEFAULT_MAX_ITERATIONS,
         completionSignals: normalizeCompletionSignals(options.completionSignal),
         idleTimeoutSeconds:
           options.idleTimeoutSeconds ?? DEFAULT_IDLE_TIMEOUT_SECONDS,
-        sandboxExec: (cmd) => handle!.exec(cmd),
-        signal: options.signal,
+        ...(options.signal !== undefined && { signal: options.signal }),
       }).pipe(Effect.provide(agentInvokerLayer)),
     );
 
-    await strategy.afterIteration();
+    await strategy.finalize();
 
     resultBase = {
       branch: strategy.resultBranch,
       iterations: loopResult.iterations,
       commits: loopResult.commits,
       stdout: loopResult.stdout,
-      logFilePath: log.path,
+      logFilePath: session.logFilePath,
       ...(loopResult.completionSignal !== undefined && {
         completionSignal: loopResult.completionSignal,
       }),
     };
   } catch (error) {
-    if (runLog) {
-      await runLog.runEnded(
-        "error",
-        error instanceof Error ? error.message : String(error),
-      );
+    runError = error instanceof Error ? error : new Error(String(error));
+  } finally {
+    // Teardown order matches pre-refactor behaviour: write the run-end record
+    // first (so the file captures the original error promptly), then close
+    // the sandbox handle, then the worktree strategy. Each step swallows its
+    // own errors so one failure doesn't mask another.
+    if (session !== undefined) {
+      await (runError !== undefined
+        ? session.endError(runError.message)
+        : session.endOk());
     }
     await closeHandleSafely(handle);
-    await strategy.close();
-
-    if (runLog) await runLog.close();
-    throw error;
+    try {
+      const r = await strategy.close();
+      preservedPath = r.preservedPath;
+    } catch (e) {
+      process.stderr.write(
+        `sanddune: worktree teardown failed: ${
+          e instanceof Error ? e.message : String(e)
+        }\n`,
+      );
+    }
   }
 
-  // The catch arm always rethrows, so reaching here implies both are assigned.
-  const finalLog = runLog!;
+  if (runError !== undefined) throw runError;
+
+  // Reaching here implies success: resultBase was assigned in the try block.
   const finalResult = resultBase!;
-
-  await closeHandleSafely(handle);
-  await finalLog.runEnded("ok");
-  const { preservedPath } = await strategy.close();
-  await finalLog.close();
-
   return preservedPath !== undefined
     ? { ...finalResult, worktreePath: preservedPath }
     : finalResult;
@@ -176,7 +175,8 @@ async function closeHandleSafely(
     await handle.close();
   } catch (closeError) {
     process.stderr.write(
-      `sanddune: sandbox teardown failed: ${closeError instanceof Error ? closeError.message : String(closeError)
+      `sanddune: sandbox teardown failed: ${
+        closeError instanceof Error ? closeError.message : String(closeError)
       }\n`,
     );
   }

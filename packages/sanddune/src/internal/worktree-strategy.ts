@@ -14,10 +14,10 @@ export interface WorktreeStrategy {
    *  agent's commits end up. Equals `targetBranch` for `head` and
    *  `merge-to-head` (after fast-forward back), `sourceBranch` for `branch`. */
   readonly resultBranch: string;
-  /** Run after the iteration loop succeeds and before final commit reconciliation.
-   *  No-op for `head` and `branch`; fast-forwards the temp source branch back to
-   *  the target branch for `merge-to-head`. */
-  afterIteration(): Promise<void>;
+  /** Run once after the iteration loop succeeds and before final commit
+   *  reconciliation. No-op for `head` and `branch`; fast-forwards the temp
+   *  source branch back to the target branch for `merge-to-head`. */
+  finalize(): Promise<void>;
   /** Tears down any worktree, lock, or temp branch this strategy created.
    *  Never throws — logs to stderr and returns `{}` on internal failure. */
   close(): Promise<{ preservedPath?: string }>;
@@ -69,7 +69,7 @@ function createHeadStrategy(args: {
     sourceBranch: args.sourceBranch,
     targetBranch: args.targetBranch,
     resultBranch: args.targetBranch,
-    async afterIteration() {},
+    async finalize() {},
     async close() {
       return {};
     },
@@ -92,7 +92,7 @@ async function createNamedBranchStrategy(args: {
     sourceBranch: worktree.sourceBranch,
     targetBranch: args.targetBranch,
     resultBranch: worktree.sourceBranch,
-    async afterIteration() {},
+    async finalize() {},
     async close() {
       try {
         const r = await worktree.close();
@@ -124,7 +124,7 @@ async function createMergeToHeadStrategy(args: {
     sourceBranch: worktree.sourceBranch,
     targetBranch: args.targetBranch,
     resultBranch: args.targetBranch,
-    async afterIteration() {
+    async finalize() {
       await gitMerge(args.cwd, worktree.sourceBranch);
       mergeOk = true;
     },

@@ -5,14 +5,17 @@ import type { CompletionSignal } from "./run";
 export interface AgentInvokeInput {
   readonly prompt: string;
   readonly iteration: number;
-  /** Aborts the in-flight agent subprocess. Used by the iteration loop to
-   *  enforce idle timeouts; the rejection reason is propagated verbatim. */
+  /** Caller-supplied abort. Forwarded to the underlying subprocess; on abort
+   *  the agent is killed (via `spawnHost` SIGTERM) and `invoke()` rejects with
+   *  `signal.reason` verbatim (ADR-0004). */
   readonly signal?: AbortSignal;
-  /** Fired as each agent stream event is parsed off the subprocess stdout —
-   *  before `invoke()` resolves. The iteration loop uses this to reset its
-   *  per-event idle timer. Synchronous; errors thrown by the callback are
-   *  not caught. */
-  readonly onEvent?: (event: AgentStreamEvent) => void;
+  /** Per-iteration idle timeout. The invoker arms a watchdog that resets on
+   *  every parsed **agent stream event** and, on expiry, synthesizes an abort
+   *  with `AgentIdleTimeoutError` as the reason — same contract as a
+   *  caller-supplied `signal` (ADR-0011). The composition with the caller's
+   *  signal is owned inside the invoker; callers do not see the composite.
+   *  A non-positive value disables the watchdog. */
+  readonly idleTimeoutSeconds: number;
 }
 
 export interface AgentInvokeResult {

@@ -49,25 +49,14 @@ export type {
 export type { Timeouts } from "./timeouts";
 export type { LoggingOption } from "./logging";
 export type { PromptArgs, PromptOption } from "./prompt";
-export { resolvePrompt } from "./prompt-resolver";
-export type { PromptResolverInput, ResolvedPrompt } from "./prompt-resolver";
 
-export {
-  BUILT_IN_PROMPT_ARGS,
-  substitutePromptArgs,
-} from "./prompt-argument-substitution";
+export { BUILT_IN_PROMPT_ARGS, preparePromptPipeline } from "./prompt-pipeline";
 export type {
   BuiltInPromptArg,
-  SubstitutePromptArgsInput,
-  SubstitutePromptArgsResult,
-} from "./prompt-argument-substitution";
-
-export { expandPrompt } from "./prompt-expansion";
-export type {
-  ExpandPromptInput,
-  ExpandPromptResult,
+  PreparedPromptPipeline,
+  PromptPipelineInput,
   SandboxExec,
-} from "./prompt-expansion";
+} from "./prompt-pipeline";
 
 export type {
   CompletionSignal,

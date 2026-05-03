@@ -56,7 +56,7 @@ describe("createWorktreeStrategy", () => {
       expect(strategy.targetBranch).toBe("main");
       expect(strategy.resultBranch).toBe("main");
 
-      await strategy.afterIteration();
+      await strategy.finalize();
       const close = await strategy.close();
       expect(close).toEqual({});
     });
