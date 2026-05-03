@@ -37,6 +37,7 @@ A TypeScript library for orchestrating AI coding agents in isolated sandboxes.
 | `onAgentStreamEvent` callback        | ✅ shipped | Sync, fire-and-forget; errors swallowed (file mode only)                         |
 | `IterationResult.usage`              | ✅ shipped | Raw token counts parsed from captured Claude session JSONL (per ADR-0005b)       |
 | Custom bind-mount provider           | ✅ shipped | Build your own by constructing a `BindMountSandboxProvider` |
+| `createSandbox()`                   | ✅ shipped | Long-lived reusable sandbox on a single branch; multiple `sandbox.run()` calls reuse the container; `await using` auto-disposes |
 
 ## Quick start
 

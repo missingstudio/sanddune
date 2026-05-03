@@ -11,6 +11,7 @@ import type {
   Sandbox,
   Worktree,
 } from "./core";
+import { createSandboxProgram } from "./internal/create-sandbox-program";
 import { runProgram } from "./internal/run-program";
 
 export * from "./core";
@@ -23,9 +24,11 @@ export function run<S extends RunSandboxProvider>(
 }
 
 export function createSandbox<S extends CreateSandboxProvider>(
-  _options: CreateSandboxOptions<S>,
+  options: CreateSandboxOptions<S>,
 ): Promise<Sandbox> {
-  throw new NotImplementedError("createSandbox");
+  return createSandboxProgram(
+    options as CreateSandboxOptions<CreateSandboxProvider>,
+  );
 }
 
 export function createWorktree(
