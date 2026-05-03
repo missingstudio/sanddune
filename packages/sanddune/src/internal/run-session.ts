@@ -1,6 +1,7 @@
-import type { AgentStreamEvent } from "../core";
-import { openRunLog, type RunLog } from "./run-log";
-import { newRunId } from "./run-id";
+import { isAbsolute, resolve as resolvePath } from "node:path";
+import type { AgentStreamEvent, LoggingOption } from "../core";
+import { openFileRunSession } from "./run-session-file";
+import { openStdoutRunSession } from "./run-session-stdout";
 
 /** The narrow log surface the **iteration loop** calls per-iteration. */
 export interface IterationLogger {
@@ -8,69 +9,59 @@ export interface IterationLogger {
   iterationEnded(iteration: number, commitSha: string | null): Promise<void>;
 }
 
-/** Owns the **run log** lifecycle for one **run session**: writes `runStarted`
- *  on construction, exposes per-iteration logging to the **iteration loop**,
- *  fans **agent stream events** into the log, and writes the terminal record
- *  + closes the file when `endOk()` / `endError()` is called.
+/** Owns the **run session** lifecycle: writes a `runStarted` record on
+ *  construction, exposes per-iteration logging to the **iteration loop**,
+ *  fans **agent stream events** to the appropriate sink (run log + optional
+ *  caller callback in **log-to-file mode**, terminal renderer in **terminal
+ *  mode**), and writes the terminal record + closes any underlying file when
+ *  `endOk()` / `endError()` is called.
  *
  *  Both `endOk()` and `endError()` are idempotent (a second call is a no-op)
  *  and never reject — teardown failures are swallowed onto stderr so they
  *  don't mask the original run error. */
 export interface RunSession {
-  readonly logFilePath: string;
+  /** Absolute path of the **run log** in **log-to-file mode**; `undefined`
+   *  in **terminal mode**. Surfaced verbatim onto `RunResult.logFilePath`. */
+  readonly logFilePath: string | undefined;
   readonly logger: IterationLogger;
-  /** Forward an **agent stream event** into the **run log**; intended to be
-   *  passed as `onEvent` to `makeProductionAgentInvoker`. */
+  /** Forward an **agent stream event** to the session's sink. */
   recordAgentEvent(event: AgentStreamEvent): void;
   endOk(): Promise<void>;
   endError(message: string): Promise<void>;
 }
 
-/** Opens a new **run session** in `${cwd}/.sanddune/logs/`, prints the
- *  `tail -f` hint, and writes the `run-start` record before returning. */
-export async function openRunSession(cwd: string): Promise<RunSession> {
-  const runId = newRunId();
-  const log: RunLog = await openRunLog(cwd, runId);
+export interface OpenRunSessionInput {
+  readonly cwd: string;
+  readonly logging?: LoggingOption;
+  /** Optional display name prefixed in log output for parallel-run
+   *  readability — e.g. `[issue-42] tail -f …`. */
+  readonly name?: string;
+}
 
-  process.stdout.write(
-    `sanddune: streaming run log to ${log.path}\n  tail -f ${log.path}\n`,
-  );
-  await log.runStarted();
+/** Picks the **run session** implementation from `logging.type`. Defaults to
+ *  **log-to-file mode** when `logging` is omitted (matches the contract for
+ *  programmatic `run()` calls). */
+export async function openRunSession(
+  input: OpenRunSessionInput,
+): Promise<RunSession> {
+  const logging = input.logging;
+  if (logging?.type === "stdout") {
+    return openStdoutRunSession({
+      ...(input.name !== undefined && { name: input.name }),
+    });
+  }
+  return openFileRunSession({
+    cwd: input.cwd,
+    ...(input.name !== undefined && { name: input.name }),
+    ...(logging?.path !== undefined && {
+      path: resolveLogPath(logging.path, input.cwd),
+    }),
+    ...(logging?.onAgentStreamEvent !== undefined && {
+      onAgentStreamEvent: logging.onAgentStreamEvent,
+    }),
+  });
+}
 
-  let ended = false;
-  const end = async (status: "ok" | "error", message?: string) => {
-    if (ended) return;
-    ended = true;
-    try {
-      await log.runEnded(status, message);
-    } catch (e) {
-      process.stderr.write(
-        `sanddune: failed to write run-end record: ${
-          e instanceof Error ? e.message : String(e)
-        }\n`,
-      );
-    }
-    try {
-      await log.close();
-    } catch (e) {
-      process.stderr.write(
-        `sanddune: failed to close run log: ${
-          e instanceof Error ? e.message : String(e)
-        }\n`,
-      );
-    }
-  };
-
-  return {
-    logFilePath: log.path,
-    logger: {
-      iterationStarted: (i) => log.iterationStarted(i),
-      iterationEnded: (i, sha) => log.iterationEnded(i, sha),
-    },
-    recordAgentEvent: (event) => {
-      void log.agentEvent(event);
-    },
-    endOk: () => end("ok"),
-    endError: (message) => end("error", message),
-  };
+function resolveLogPath(path: string, cwd: string): string {
+  return isAbsolute(path) ? path : resolvePath(cwd, path);
 }

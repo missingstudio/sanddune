@@ -21,6 +21,13 @@ export interface AgentInvokeInput {
    *  `--resume <id>`). The **iteration loop** sets this only on iteration 1
    *  when `RunOptions.resumeSession` is configured. */
   readonly resumeSessionId?: string;
+  /** Fire-and-forget per-event callback. The production invoker invokes
+   *  this for each parsed **agent stream event** as it arrives off the
+   *  agent's stdout, *before* `invoke()` resolves — so the **run log**
+   *  picks up events in near-real-time and `tail -f` shows progress mid
+   *  iteration. Test fakes are responsible for invoking it themselves to
+   *  exercise downstream fan-out. */
+  readonly onEvent?: (event: AgentStreamEvent) => void;
 }
 
 export interface AgentInvokeResult {

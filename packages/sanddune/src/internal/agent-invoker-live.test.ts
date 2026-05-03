@@ -78,6 +78,7 @@ function runInvoke(
     idleTimeoutSeconds: number;
     signal?: AbortSignal;
     resumeSessionId?: string;
+    onEvent?: (event: AgentStreamEvent) => void;
   },
 ) {
   return runEffect(
@@ -89,6 +90,7 @@ function runInvoke(
       ...(input.resumeSessionId !== undefined && {
         resumeSessionId: input.resumeSessionId,
       }),
+      ...(input.onEvent !== undefined && { onEvent: input.onEvent }),
     }),
   );
 }
@@ -100,12 +102,14 @@ describe("makeProductionAgentInvoker — idle timeout", () => {
     const invoker = makeProductionAgentInvoker({
       agentProvider: makeFakeAgent(),
       handle,
-      onEvent: (e) => observed.push(e),
     });
 
     const start = Date.now();
     await expect(
-      runInvoke(invoker, { idleTimeoutSeconds: 0.1 }),
+      runInvoke(invoker, {
+        idleTimeoutSeconds: 0.1,
+        onEvent: (e) => observed.push(e),
+      }),
     ).rejects.toMatchObject({
       name: "AgentIdleTimeoutError",
       idleTimeoutSeconds: 0.1,
@@ -130,10 +134,12 @@ describe("makeProductionAgentInvoker — idle timeout", () => {
     const invoker = makeProductionAgentInvoker({
       agentProvider: makeFakeAgent(),
       handle,
-      onEvent: (e) => observed.push(e),
     });
 
-    const result = await runInvoke(invoker, { idleTimeoutSeconds: 0.2 });
+    const result = await runInvoke(invoker, {
+      idleTimeoutSeconds: 0.2,
+      onEvent: (e) => observed.push(e),
+    });
     expect(result.events).toHaveLength(6);
     expect(observed).toHaveLength(6);
   });
@@ -149,12 +155,14 @@ describe("makeProductionAgentInvoker — idle timeout", () => {
     const invoker = makeProductionAgentInvoker({
       agentProvider: makeFakeAgent(),
       handle,
-      onEvent: (e) => observed.push(e),
     });
 
     const start = Date.now();
     await expect(
-      runInvoke(invoker, { idleTimeoutSeconds: 0.1 }),
+      runInvoke(invoker, {
+        idleTimeoutSeconds: 0.1,
+        onEvent: (e) => observed.push(e),
+      }),
     ).rejects.toMatchObject({
       name: "AgentIdleTimeoutError",
       idleTimeoutSeconds: 0.1,
@@ -172,7 +180,6 @@ describe("makeProductionAgentInvoker — idle timeout", () => {
     const invoker = makeProductionAgentInvoker({
       agentProvider: makeFakeAgent(),
       handle,
-      onEvent: () => {},
     });
 
     const result = await runInvoke(invoker, { idleTimeoutSeconds: 0 });
@@ -188,7 +195,6 @@ describe("makeProductionAgentInvoker — caller signal composition (ADR-0011)", 
     const invoker = makeProductionAgentInvoker({
       agentProvider: makeFakeAgent(),
       handle,
-      onEvent: () => {},
     });
 
     setTimeout(() => controller.abort(reason), 50);
@@ -207,7 +213,6 @@ describe("makeProductionAgentInvoker — caller signal composition (ADR-0011)", 
     const invoker = makeProductionAgentInvoker({
       agentProvider: makeFakeAgent(),
       handle,
-      onEvent: () => {},
     });
 
     await expect(
@@ -227,13 +232,13 @@ describe("makeProductionAgentInvoker — caller signal composition (ADR-0011)", 
     const invoker = makeProductionAgentInvoker({
       agentProvider: makeFakeAgent(),
       handle,
-      onEvent: (e) => observed.push(e),
     });
 
     await expect(
       runInvoke(invoker, {
         idleTimeoutSeconds: 0.1,
         signal: controller.signal,
+        onEvent: (e) => observed.push(e),
       }),
     ).rejects.toBe(reason);
     expect(observed).toEqual([]);
@@ -255,7 +260,6 @@ describe("makeProductionAgentInvoker — session capture", () => {
     const invoker = makeProductionAgentInvoker({
       agentProvider: provider,
       handle,
-      onEvent: () => {},
     });
 
     await runInvoke(invoker, { idleTimeoutSeconds: 60 });
@@ -289,7 +293,6 @@ describe("makeProductionAgentInvoker — session capture", () => {
     const invoker = makeProductionAgentInvoker({
       agentProvider: provider,
       handle,
-      onEvent: () => {},
     });
 
     const result = await runInvoke(invoker, { idleTimeoutSeconds: 60 });
@@ -301,7 +304,6 @@ describe("makeProductionAgentInvoker — session capture", () => {
     const invoker = makeProductionAgentInvoker({
       agentProvider: makeFakeAgent(),
       handle,
-      onEvent: () => {},
     });
     const result = await runInvoke(invoker, { idleTimeoutSeconds: 60 });
     expect(result.sessionId).toBeUndefined();
@@ -320,7 +322,6 @@ describe("makeProductionAgentInvoker — exec failure", () => {
     const invoker = makeProductionAgentInvoker({
       agentProvider: makeFakeAgent(),
       handle,
-      onEvent: () => {},
     });
 
     await expect(

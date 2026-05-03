@@ -872,6 +872,191 @@ describe("runProgram (integration)", () => {
       expect(closeCalls).toEqual([1]);
     });
 
+    test("onAgentStreamEvent receives every parsed event in file mode", async () => {
+      const closeCalls: number[] = [];
+      const provider = makeLocalProcessBindMountProvider(closeCalls);
+      const agent: AgentProvider = {
+        name: "stub",
+        buildCommand: () => "true",
+        parseLine: () => [],
+      };
+
+      // Fake invoker that mirrors the production contract: calls
+      // `input.onEvent` per parsed event before resolving with the batch.
+      const fakeInvoker: AgentInvokerService = {
+        invoke: ({ iteration, onEvent }) =>
+          Effect.tryPromise({
+            try: async () => {
+              const events = [
+                {
+                  type: "text" as const,
+                  content: "first\n",
+                  iteration,
+                  timestamp: Date.now(),
+                },
+                {
+                  type: "toolCall" as const,
+                  name: "Read",
+                  input: { path: "/x" },
+                  iteration,
+                  timestamp: Date.now(),
+                },
+              ];
+              for (const event of events) onEvent?.(event);
+              return { events };
+            },
+            catch: (e) => (e instanceof Error ? e : new Error(String(e))),
+          }),
+      };
+
+      const received: { type: string; iteration: number }[] = [];
+      const result = await runProgram(
+        {
+          agent,
+          sandbox: provider,
+          prompt: "go",
+          cwd: repo,
+          logging: {
+            type: "file",
+            onAgentStreamEvent: (event) => {
+              received.push({ type: event.type, iteration: event.iteration });
+            },
+          },
+        },
+        { agentInvokerLayer: Layer.succeed(AgentInvoker, fakeInvoker) },
+      );
+
+      expect(received).toEqual([
+        { type: "text", iteration: 1 },
+        { type: "toolCall", iteration: 1 },
+      ]);
+      expect(result.logFilePath).toMatch(/\.sanddune\/logs\/.+\.jsonl$/);
+    });
+
+    test("onAgentStreamEvent that throws does not kill the run", async () => {
+      const closeCalls: number[] = [];
+      const provider = makeLocalProcessBindMountProvider(closeCalls);
+      const agent: AgentProvider = {
+        name: "stub",
+        buildCommand: () => "true",
+        parseLine: () => [],
+      };
+
+      const fakeInvoker: AgentInvokerService = {
+        invoke: ({ iteration, onEvent }) =>
+          Effect.tryPromise({
+            try: async () => {
+              const event = {
+                type: "text" as const,
+                content: "ok\n",
+                iteration,
+                timestamp: Date.now(),
+              };
+              onEvent?.(event);
+              return { events: [event] };
+            },
+            catch: (e) => (e instanceof Error ? e : new Error(String(e))),
+          }),
+      };
+
+      const result = await runProgram(
+        {
+          agent,
+          sandbox: provider,
+          prompt: "go",
+          cwd: repo,
+          logging: {
+            type: "file",
+            onAgentStreamEvent: () => {
+              throw new Error("forwarder broken");
+            },
+          },
+        },
+        { agentInvokerLayer: Layer.succeed(AgentInvoker, fakeInvoker) },
+      );
+
+      // Run resolved successfully despite the broken forwarder.
+      expect(result.iterations).toHaveLength(1);
+      expect(closeCalls).toEqual([1]);
+    });
+
+    test("logging.type: 'stdout' leaves logFilePath undefined", async () => {
+      const closeCalls: number[] = [];
+      const provider = makeLocalProcessBindMountProvider(closeCalls);
+      const agent: AgentProvider = {
+        name: "stub",
+        buildCommand: () => "true",
+        parseLine: () => [],
+      };
+
+      const fakeInvoker: AgentInvokerService = {
+        invoke: ({ iteration }) =>
+          Effect.succeed({
+            events: [
+              {
+                type: "text" as const,
+                content: "ok\n",
+                iteration,
+                timestamp: Date.now(),
+              },
+            ],
+          }),
+      };
+
+      const result = await runProgram(
+        {
+          agent,
+          sandbox: provider,
+          prompt: "go",
+          cwd: repo,
+          logging: { type: "stdout" },
+        },
+        { agentInvokerLayer: Layer.succeed(AgentInvoker, fakeInvoker) },
+      );
+
+      expect(result.logFilePath).toBeUndefined();
+      expect(result.iterations).toHaveLength(1);
+    });
+
+    test("logging.path overrides the default .sanddune/logs/ location", async () => {
+      const customLog = join(repo, "custom-logs", "my-run.jsonl");
+      const closeCalls: number[] = [];
+      const provider = makeLocalProcessBindMountProvider(closeCalls);
+      const agent: AgentProvider = {
+        name: "stub",
+        buildCommand: () => "true",
+        parseLine: () => [],
+      };
+
+      const fakeInvoker: AgentInvokerService = {
+        invoke: ({ iteration }) =>
+          Effect.succeed({
+            events: [
+              {
+                type: "text" as const,
+                content: "ok\n",
+                iteration,
+                timestamp: Date.now(),
+              },
+            ],
+          }),
+      };
+
+      const result = await runProgram(
+        {
+          agent,
+          sandbox: provider,
+          prompt: "go",
+          cwd: repo,
+          logging: { type: "file", path: customLog },
+        },
+        { agentInvokerLayer: Layer.succeed(AgentInvoker, fakeInvoker) },
+      );
+
+      expect(result.logFilePath).toBe(customLog);
+      expect(existsSync(customLog)).toBe(true);
+    });
+
     test("template prompts get shell expressions expanded before each iteration", async () => {
       const promptFile = join(repo, "expand.md");
       await writeFile(promptFile, "Work on !`echo expanded-token`\n");

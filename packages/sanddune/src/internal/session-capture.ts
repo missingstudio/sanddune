@@ -4,6 +4,7 @@ import type {
   AgentProvider,
   AgentSessionCapture,
   BindMountSandboxHandle,
+  IterationUsage,
 } from "../core";
 
 /** Validates `RunOptions.resumeSession` BEFORE the sandbox is created. The
@@ -71,9 +72,21 @@ export async function transferSessionToSandbox(input: {
   await writeFileInSandbox(handle, sandboxPath, rewritten);
 }
 
+export interface CaptureSessionResult {
+  readonly hostPath: string;
+  /** Raw token counts for the iteration, when the agent provider's
+   *  `sessionCapture.parseUsage` is implemented and the captured JSONL has
+   *  usage data. `undefined` when the capability is absent or the file
+   *  contains no usable assistant message — capture is best-effort. */
+  readonly usage?: IterationUsage;
+}
+
 /** Builds the best-effort capture closure handed to the **iteration loop**.
  *  Returns `undefined` when the agent has no `sessionCapture` capability —
- *  the loop then never asks. */
+ *  the loop then never asks. The closure resolves to a
+ *  `CaptureSessionResult` on success (carrying the host path + optional
+ *  usage), or `undefined` if capture failed (handled internally with a
+ *  stderr warning — the run still proceeds). */
 export function makeCaptureSessionFn(input: {
   readonly handle: BindMountSandboxHandle;
   readonly agent: AgentProvider;
@@ -82,7 +95,7 @@ export function makeCaptureSessionFn(input: {
   | ((args: {
       readonly iteration: number;
       readonly sessionId: string;
-    }) => Promise<string | undefined>)
+    }) => Promise<CaptureSessionResult | undefined>)
   | undefined {
   const capture = input.agent.sessionCapture;
   if (capture === undefined) return undefined;
@@ -101,7 +114,8 @@ export function makeCaptureSessionFn(input: {
       const hostPath = capture.hostSessionPath(input.hostCwd, sessionId);
       await mkdir(dirname(hostPath), { recursive: true });
       await writeFile(hostPath, rewritten);
-      return hostPath;
+      const usage = capture.parseUsage?.(rewritten);
+      return usage !== undefined ? { hostPath, usage } : { hostPath };
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       process.stderr.write(

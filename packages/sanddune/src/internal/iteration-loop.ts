@@ -1,5 +1,10 @@
 import { Effect } from "effect";
-import { AgentInvoker, type IterationResult } from "../core";
+import {
+  AgentInvoker,
+  type AgentStreamEvent,
+  type IterationResult,
+  type IterationUsage,
+} from "../core";
 import { gitNewCommits } from "./git";
 import type { IterationLogger } from "./run-session";
 
@@ -35,14 +40,18 @@ export interface IterationLoopInput {
    *  state through `--resume`). */
   readonly resumeSessionId?: string;
   /** Best-effort capture closure invoked after each iteration whose invoke
-   *  returned a `sessionId`. Returns the absolute host path on success,
+   *  returned a `sessionId`. Resolves to `{ hostPath, usage? }` on success,
    *  `undefined` if capture failed (the closure handles its own logging).
    *  Omitted when the agent provider has no `sessionCapture` capability or
    *  capture is disabled — in that case the loop never asks. */
   readonly captureSession?: (input: {
     readonly iteration: number;
     readonly sessionId: string;
-  }) => Promise<string | undefined>;
+  }) => Promise<{ readonly hostPath: string; readonly usage?: IterationUsage } | undefined>;
+  /** Forwarded to the **agent invoker**'s `onEvent` so the production path
+   *  fans events into the **run log** (and the user's `onAgentStreamEvent`
+   *  callback) in near-real-time, not at iteration boundaries. */
+  readonly onEvent?: (event: AgentStreamEvent) => void;
 }
 
 export interface IterationLoopResult {
@@ -83,6 +92,7 @@ export const runIterationLoop = (
         idleTimeoutSeconds: input.idleTimeoutSeconds,
         ...(input.signal !== undefined && { signal: input.signal }),
         ...(resumeSessionId !== undefined && { resumeSessionId }),
+        ...(input.onEvent !== undefined && { onEvent: input.onEvent }),
       });
 
       let signalMatched: string | undefined;
@@ -109,16 +119,21 @@ export const runIterationLoop = (
       if (lastCommit !== null) lastSha = lastCommit;
 
       let sessionFilePath: string | undefined;
+      let usage: IterationUsage | undefined;
       if (
         input.captureSession !== undefined &&
         result.sessionId !== undefined
       ) {
-        sessionFilePath = yield* fromPromise(() =>
+        const captured = yield* fromPromise(() =>
           input.captureSession!({
             iteration,
             sessionId: result.sessionId!,
           }),
         );
+        if (captured !== undefined) {
+          sessionFilePath = captured.hostPath;
+          usage = captured.usage;
+        }
       }
 
       yield* fromPromise(() =>
@@ -130,6 +145,7 @@ export const runIterationLoop = (
         ...(lastCommit !== null && { commitSha: lastCommit }),
         ...(result.sessionId !== undefined && { sessionId: result.sessionId }),
         ...(sessionFilePath !== undefined && { sessionFilePath }),
+        ...(usage !== undefined && { usage }),
         ...(signalMatched !== undefined && { completionSignal: signalMatched }),
       });
 

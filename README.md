@@ -32,7 +32,10 @@ A TypeScript library for orchestrating AI coding agents in isolated sandboxes.
 | `branchStrategy: { type: "merge-to-head" }` | ✅ shipped | Worktree under `.sanddune/worktrees/<id>/`, fast-forward back to HEAD on success |
 | `branchStrategy: { type: "branch", branch }` | ✅ shipped | Named branch in a worktree; reused on re-run            |
 | Env resolution                       | ✅ shipped | `.sanddune/.env` + agent/sandbox `env` + `RunOptions.env`         |
-| JSONL run log                        | ✅ shipped | Streamed to `.sanddune/logs/<run-id>.jsonl`                                      |
+| JSONL run log                        | ✅ shipped | Streamed to `.sanddune/logs/<run-id>.jsonl` (or `logging.path`)                  |
+| Terminal mode (`logging: { type: "stdout" }`) | ✅ shipped | Spinners + styled status lines + run summary                                 |
+| `onAgentStreamEvent` callback        | ✅ shipped | Sync, fire-and-forget; errors swallowed (file mode only)                         |
+| `IterationResult.usage`              | ✅ shipped | Raw token counts parsed from captured Claude session JSONL (per ADR-0005b)       |
 | Custom bind-mount provider           | ✅ shipped | Build your own by constructing a `BindMountSandboxProvider` |
 
 ## Quick start
@@ -188,7 +191,28 @@ await run({
 
 #### Accepted by the type but not yet wired
 
-`timeouts.idleSeconds`, `timeouts.totalSeconds`, `logging`. Silently ignored. Don't depend on them.
+`timeouts.idleSeconds`, `timeouts.totalSeconds`. Silently ignored. Don't depend on them.
+
+#### `logging`
+
+```typescript
+logging: { type: "file" }                                // default
+logging: { type: "file", path: "/abs/or/relative.jsonl" } // override location
+logging: { type: "file", onAgentStreamEvent: (event) => { /* forward */ } }
+logging: { type: "stdout" }                              // terminal mode
+```
+
+In **log-to-file mode** (default), sanddune writes a **run log** to `.sanddune/logs/<run-id>.jsonl` (or `path` when supplied) and prints a `tail -f` hint. `RunResult.logFilePath` is the absolute path of the file. The optional `onAgentStreamEvent` callback fires synchronously for every parsed **agent stream event** carrying `{ iteration, timestamp, type: "text" | "toolCall", ... }` — intended for forwarding to an observability system. The callback is fire-and-forget; thrown errors are swallowed onto stderr so a broken forwarder cannot kill the run.
+
+In **terminal mode** (`{ type: "stdout" }`), sanddune renders an interactive UI directly: spinners while iterations run, a status line per iteration, and a final summary. `RunResult.logFilePath` is `undefined`; `onAgentStreamEvent` is **not** surfaced in this mode (the rendered UI is the channel).
+
+#### `name`
+
+```typescript
+name: "issue-42"
+```
+
+Optional display name prefixed in log output (`[issue-42] tail -f …`) and **terminal mode** rendering for parallel-run readability. Cosmetic only — not persisted in the **run log** records.
 
 ### `RunResult`
 
@@ -200,7 +224,7 @@ interface RunResult {
   commits: string[];               // SHAs reachable from worktree HEAD past the pre-run tip, ordered by iteration
   completionSignal?: string;       // the matched completion-signal string, if the loop terminated by signal
   stdout: string;                  // concatenated text events from the agent stream
-  logFilePath: string;             // path to the JSONL run log
+  logFilePath?: string;            // path to the JSONL run log; undefined in terminal mode
 }
 
 interface IterationResult {
@@ -208,8 +232,15 @@ interface IterationResult {
   commitSha?: string;              // last commit produced on this iteration, if any
   sessionId?: string;              // agent session id (Claude Code system/init), when sessionCapture is configured
   sessionFilePath?: string;        // host path to captured JSONL, when capture succeeded
-  usage?: IterationUsage;          // not set today
+  usage?: IterationUsage;          // raw token counts parsed from the captured session JSONL (per ADR-0005b)
   completionSignal?: string;       // set on the iteration that matched the completion signal
+}
+
+interface IterationUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheCreationInputTokens?: number;
+  cacheReadInputTokens?: number;
 }
 ```
 
@@ -305,7 +336,7 @@ The isolated-provider factory is declared in the type system but not yet usable 
 
 ## Run log
 
-Every run streams JSONL events to `.sanddune/logs/<run-id>.jsonl` and prints a `tail -f` hint at start. Today the log is the only output channel — `logging: { type: "stdout" }` is accepted by the type but ignored. Follow it from another terminal:
+Every `run()` in **log-to-file mode** (the default) streams JSONL events to `.sanddune/logs/<run-id>.jsonl` (or the path supplied via `logging.path`) and prints a `tail -f` hint at start. Pass `logging: { type: "stdout" }` to switch to **terminal mode** — sanddune then renders the run inline (spinners + status lines + summary) and `RunResult.logFilePath` is `undefined`. Follow the file from another terminal:
 
 ```bash
 tail -f .sanddune/logs/*.jsonl

@@ -1,3 +1,5 @@
+import type { IterationUsage } from "./run";
+
 export type AgentStreamEvent =
   | {
       readonly type: "text";
@@ -46,6 +48,13 @@ export interface AgentSessionCapture {
   sandboxSessionPath(sandboxCwd: string, sessionId: string): string;
   /** Rewrite all `cwd` fields in the JSONL from `fromCwd` to `toCwd`. */
   rewriteCwd(jsonl: string, fromCwd: string, toCwd: string): string;
+  /** Optional: extract `IterationUsage` (raw token counts) from a captured
+   *  session JSONL. The convention is to read the *last* assistant message
+   *  in the file, since its `usage` field is cumulative for the iteration.
+   *  Returns `undefined` if the JSONL contains no usage data — capture is
+   *  best-effort, so a missing parser or a malformed file leaves
+   *  `IterationResult.usage` `undefined` per ADR 0005b. */
+  parseUsage?(jsonl: string): IterationUsage | undefined;
 }
 
 export interface AgentProvider {

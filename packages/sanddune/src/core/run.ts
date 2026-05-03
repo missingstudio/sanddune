@@ -10,11 +10,17 @@ import type { Timeouts } from "./timeouts";
 
 export type CompletionSignal = string;
 
+/** Raw token counts for one **iteration**, parsed from the **agent session**
+ *  JSONL by the **agent provider**'s `parseUsage` capability. Per ADR 0005b
+ *  these are deliberately raw — not a percentage of the context window —
+ *  because the model's context limit is not available from any data source
+ *  sanddune reads. Callers who know the limit can compute percentage
+ *  themselves. */
 export interface IterationUsage {
   readonly inputTokens: number;
   readonly outputTokens: number;
-  readonly cacheCreationTokens?: number;
-  readonly cacheReadTokens?: number;
+  readonly cacheCreationInputTokens?: number;
+  readonly cacheReadInputTokens?: number;
 }
 
 export interface IterationResult {
@@ -40,7 +46,9 @@ export interface RunResult {
   readonly commits: readonly string[];
   readonly completionSignal?: CompletionSignal;
   readonly stdout: string;
-  readonly logFilePath: string;
+  /** Absolute path of the **run log**. Populated only in **log-to-file mode**;
+   *  `undefined` in **terminal mode**. */
+  readonly logFilePath?: string;
 }
 
 export type RunOptions<S extends RunSandboxProvider = RunSandboxProvider> =
@@ -48,6 +56,10 @@ export type RunOptions<S extends RunSandboxProvider = RunSandboxProvider> =
     readonly agent: AgentProvider;
     readonly sandbox: S;
     readonly cwd?: string;
+    /** Display name prefixed in log output for parallel-run readability —
+     *  e.g. `[issue-42] tail -f …` and the same prefix in **terminal mode**
+     *  status lines. Purely cosmetic; not persisted in the **run log**. */
+    readonly name?: string;
     readonly env?: Readonly<Record<string, string>>;
     readonly branchStrategy?: AllowedBranchStrategy<S>;
     readonly maxIterations?: number;
