@@ -151,14 +151,17 @@ const result = await run({
 | ---------------- | ------------------------------- | ------------------------------------------------------------- |
 | `agent`          | `AgentProvider`                 | **Required.** Today: `claudeCode(model, { env? })`             |
 | `sandbox`        | `BindMountSandboxProvider`      | **Required.** Today: `docker()` or your own bind-mount provider |
-| `prompt`         | `string`                        | **Required.** Inline prompt; passed to the agent as-is         |
+| `prompt`         | `string`                        | Inline prompt; passed to the agent verbatim (ADR-0008)         |
+| `promptFile`     | `string`                        | Path to a prompt template file; relative paths resolve from `process.cwd()` |
 | `cwd`            | `string`                        | Host repo dir; relative paths resolve from `process.cwd()`     |
 | `branchStrategy` | `BranchStrategy`                | `head` (default) / `merge-to-head` / `branch`                  |
 | `env`            | `Record<string, string>`        | Call-site env override; highest precedence (ADR-0012)          |
 
+Exactly one of `prompt` / `promptFile` is required. `promptFile` contents are loaded and forwarded to the agent as-is — `{{KEY}}` substitution and `` !`...` `` shell expansion are not implemented yet. Combining `prompt` with `promptArgs` throws (per ADR-0008); on the template path `promptArgs` is currently silently ignored until substitution lands.
+
 #### Accepted by the type but not yet wired
 
-`promptFile`, `promptArgs`, `maxIterations`, `completionSignal`, `hooks`, `timeouts`, `logging`, `signal`, `resumeSession`, `copyToWorktree`. Passing `promptFile` throws; the rest are silently ignored. Don't depend on them.
+`maxIterations`, `completionSignal`, `hooks`, `timeouts`, `logging`, `signal`, `resumeSession`, `copyToWorktree`. Silently ignored. Don't depend on them.
 
 ### `RunResult`
 
