@@ -7,7 +7,6 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
 import {
   AgentInvoker,
-  NotImplementedError,
   type AgentInvokerService,
   type AgentProvider,
   type BindMountSandboxHandle,
@@ -207,26 +206,6 @@ describe("createWorktree (integration)", () => {
     expect(close.preservedWorktreePath).toBe(wt.worktreePath);
     expect(existsSync(wt.worktreePath)).toBe(true);
     expect(existsSync(join(wt.worktreePath, "leftover.txt"))).toBe(true);
-  });
-
-  test("wt.interactive() throws NotImplementedError until #18 lands", async () => {
-    const wt = await createWorktreeProgram({
-      branchStrategy: { type: "branch", branch: "agent/tui" },
-      cwd: repo,
-    });
-    try {
-      const provider = makeBindMountProvider({ closeCalls: [] });
-      const agent: AgentProvider = {
-        name: "stub",
-        buildCommand: () => "true",
-        parseLine: () => [],
-      };
-      await expect(
-        wt.interactive({ agent, sandbox: provider, prompt: "x" }),
-      ).rejects.toThrow(NotImplementedError);
-    } finally {
-      await wt.close();
-    }
   });
 
   test("await using auto-disposes the worktree on block exit", async () => {

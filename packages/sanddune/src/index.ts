@@ -1,4 +1,3 @@
-import { NotImplementedError } from "./core";
 import type {
   CreateSandboxOptions,
   CreateSandboxProvider,
@@ -13,6 +12,7 @@ import type {
 } from "./core";
 import { createSandboxProgram } from "./internal/create-sandbox-program";
 import { createWorktreeProgram } from "./internal/create-worktree-program";
+import { interactiveProgram } from "./internal/interactive-program";
 import { runProgram } from "./internal/run-program";
 
 export * from "./core";
@@ -39,7 +39,9 @@ export function createWorktree(
 }
 
 export function interactive<S extends InteractiveSandboxProvider>(
-  _options: InteractiveOptions<S>,
+  options: InteractiveOptions<S>,
 ): Promise<void> {
-  throw new NotImplementedError("interactive");
+  return interactiveProgram(
+    options as InteractiveOptions<InteractiveSandboxProvider>,
+  );
 }

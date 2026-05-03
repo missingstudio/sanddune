@@ -3,6 +3,8 @@ import type {
   BindMountCreateOptions,
   BindMountSandboxHandle,
   BindMountSandboxProvider,
+  ExecInteractiveOptions,
+  ExecInteractiveResult,
   ExecOptions,
   ExecResult,
 } from "../core";
@@ -11,7 +13,7 @@ import {
   resolveParentGitMount,
   type BindMount,
 } from "../internal/bind-mount-provisioning";
-import { spawnHost } from "../internal/host-process";
+import { spawnHost, spawnHostInteractive } from "../internal/host-process";
 
 export interface DockerOptions {
   readonly image?: string;
@@ -47,6 +49,8 @@ export function docker(options?: DockerOptions): BindMountSandboxProvider {
         worktreePath: SANDBOX_WORKTREE,
         exec: (command, execOptions) =>
           dockerExec(containerId, command, execOptions),
+        execInteractive: (command, interactiveOptions) =>
+          dockerExecInteractive(containerId, command, interactiveOptions),
         close: async () => {
           await dockerRm(containerId);
         },
@@ -109,6 +113,19 @@ async function dockerExec(
   return spawnHost("docker", args, {
     onLine: options?.onLine,
     signal: options?.signal,
+  });
+}
+
+async function dockerExecInteractive(
+  containerId: string,
+  command: string,
+  options?: ExecInteractiveOptions,
+): Promise<ExecInteractiveResult> {
+  const args = ["exec", "-it"];
+  if (options?.cwd) args.push("-w", options.cwd);
+  args.push(containerId, "sh", "-c", command);
+  return spawnHostInteractive("docker", args, {
+    ...(options?.signal && { signal: options.signal }),
   });
 }
 

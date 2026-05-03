@@ -11,6 +11,7 @@ import type {
   NoSandboxProvider,
 } from "./core";
 import type { Sandbox } from "./core";
+import type { Worktree } from "./core";
 import {
   createSandbox,
   createWorktree,
@@ -79,6 +80,46 @@ function _typeChecks() {
   void interactive({
     agent: agentStub,
     sandbox: noSandboxStub,
+    prompt: "x",
+  });
+
+  // interactive() accepts no prompt at all — the TUI launches bare.
+  void interactive({
+    agent: agentStub,
+    sandbox: noSandboxStub,
+  });
+
+  // interactive() does not accept branchStrategy (top-level uses provider
+  // default; route through createWorktree() + wt.interactive() for non-default).
+  void interactive({
+    agent: agentStub,
+    sandbox: bindMountStub,
+    // @ts-expect-error branchStrategy is not accepted by top-level interactive()
+    branchStrategy: { type: "merge-to-head" },
+  });
+
+  // interactive() does not accept maxIterations / completionSignal — those
+  // are iteration-loop concerns; interactive sessions are user-driven.
+  void interactive({
+    agent: agentStub,
+    sandbox: noSandboxStub,
+    // @ts-expect-error maxIterations is not part of InteractiveOptions
+    maxIterations: 5,
+  });
+  void interactive({
+    agent: agentStub,
+    sandbox: noSandboxStub,
+    // @ts-expect-error completionSignal is not part of InteractiveOptions
+    completionSignal: "DONE",
+  });
+
+  // wt.interactive() defaults to noSandbox() — sandbox is optional.
+  const wtStub = null as unknown as Worktree;
+  void wtStub.interactive({ agent: agentStub });
+  void wtStub.interactive({ agent: agentStub, prompt: "x" });
+  void wtStub.interactive({
+    agent: agentStub,
+    sandbox: bindMountStub,
     prompt: "x",
   });
 

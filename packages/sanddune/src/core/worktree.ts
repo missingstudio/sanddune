@@ -2,7 +2,7 @@ import type { AgentProvider } from "./agent-provider";
 import type { NonHeadBranchStrategy } from "./branch-strategy";
 import type { SandboxHooks } from "./hooks";
 import type { LoggingOption } from "./logging";
-import type { PromptOption } from "./prompt";
+import type { OptionalPromptOption, PromptOption } from "./prompt";
 import type {
   CreateSandboxProvider,
   InteractiveSandboxProvider,
@@ -37,13 +37,16 @@ export type WorktreeRunOptions<
 
 export type WorktreeInteractiveOptions<
   S extends InteractiveSandboxProvider = InteractiveSandboxProvider,
-> = PromptOption & {
+> = OptionalPromptOption & {
   readonly agent: AgentProvider;
-  readonly sandbox: S;
+  /** Optional. Defaults to a `noSandbox()` provider — agent runs directly on
+   *  the **host** in the **worktree**. */
+  readonly sandbox?: S;
   readonly env?: Readonly<Record<string, string>>;
   readonly hooks?: SandboxHooks;
   readonly timeouts?: Timeouts;
   readonly copyToWorktree?: readonly string[];
+  readonly signal?: AbortSignal;
 };
 
 export interface WorktreeCreateSandboxOptions<

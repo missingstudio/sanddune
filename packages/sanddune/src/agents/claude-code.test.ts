@@ -38,6 +38,49 @@ describe("claudeCode buildCommand", () => {
   });
 });
 
+describe("claudeCode buildInteractiveCommand", () => {
+  test("does not include --dangerously-skip-permissions when skipPermissions is false (no-sandbox case)", () => {
+    const provider = claudeCode("claude-opus-4-7");
+    const cmd = provider.buildInteractiveCommand!({ skipPermissions: false });
+    expect(cmd).not.toContain("--dangerously-skip-permissions");
+    expect(cmd).toContain("claude");
+    expect(cmd).toContain("--model 'claude-opus-4-7'");
+  });
+
+  test("includes --dangerously-skip-permissions when skipPermissions is true (sandboxed case)", () => {
+    const provider = claudeCode("claude-opus-4-7");
+    const cmd = provider.buildInteractiveCommand!({ skipPermissions: true });
+    expect(cmd).toContain("--dangerously-skip-permissions");
+  });
+
+  test("appends a shell-quoted prompt when supplied", () => {
+    const provider = claudeCode("claude-opus-4-7");
+    const cmd = provider.buildInteractiveCommand!({
+      prompt: "do the thing",
+      skipPermissions: true,
+    });
+    expect(cmd.endsWith("'do the thing'")).toBe(true);
+  });
+
+  test("omits the prompt arg when no prompt is provided", () => {
+    const provider = claudeCode("claude-opus-4-7");
+    const cmd = provider.buildInteractiveCommand!({ skipPermissions: false });
+    // No trailing positional that looks like a quoted prompt.
+    expect(cmd).toMatch(/^claude --model '[^']+'$/);
+  });
+
+  test("does not emit --print/--output-format/--verbose (those are AFK-only)", () => {
+    const provider = claudeCode("claude-opus-4-7");
+    const cmd = provider.buildInteractiveCommand!({
+      prompt: "x",
+      skipPermissions: true,
+    });
+    expect(cmd).not.toContain("--print");
+    expect(cmd).not.toContain("--output-format");
+    expect(cmd).not.toContain("--verbose");
+  });
+});
+
 describe("claudeCode sessionCapture capability", () => {
   test("present by default", () => {
     expect(claudeCode("m").sessionCapture).toBeDefined();

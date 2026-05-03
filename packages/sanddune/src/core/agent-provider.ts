@@ -25,6 +25,24 @@ export interface AgentBuildCommandInput {
   readonly resumeSessionId?: string;
 }
 
+/** Input passed by `interactive()` / `wt.interactive()` to an **agent
+ *  provider**'s `buildInteractiveCommand`. Mirrors `AgentBuildCommandInput`
+ *  for AFK runs but adds `skipPermissions` (per-call rather than always-on)
+ *  so the orchestrator can decide based on **sandbox kind** whether to
+ *  bypass the agent's permission prompts. With **no-sandbox**, the agent
+ *  runs directly on the **host** and `skipPermissions` is `false` so the
+ *  agent's normal prompts stay active. */
+export interface AgentInteractiveCommandInput {
+  /** Optional initial prompt the agent should open with. When omitted, the
+   *  agent's bare TUI is launched with no seed prompt. */
+  readonly prompt?: string;
+  /** When `true`, the agent provider should skip its normal permission
+   *  prompts (e.g. Claude Code's `--dangerously-skip-permissions`). The
+   *  orchestrator sets this for sandboxed providers (bind-mount / isolated)
+   *  and clears it for the **no-sandbox provider**. */
+  readonly skipPermissions: boolean;
+}
+
 /** Agent-specific glue for **agent session** capture and resume. Optional;
  *  agents that have no concept of a resumable session simply omit it and
  *  capture/resume become no-ops at the run-program level.
@@ -68,4 +86,9 @@ export interface AgentProvider {
   readonly sessionCapture?: AgentSessionCapture;
   buildCommand(input: AgentBuildCommandInput): string;
   parseLine(line: string, iteration: number): readonly AgentStreamEvent[];
+  /** Optional. Builds the shell command that launches the agent's TUI for
+   *  `interactive()` / `wt.interactive()`. Agents that do not have an
+   *  interactive UI omit this; calling `interactive()` with such an agent
+   *  rejects at runtime. */
+  buildInteractiveCommand?(input: AgentInteractiveCommandInput): string;
 }

@@ -2,6 +2,7 @@ import { resolve as resolvePath } from "node:path";
 import {
   type CloseResult,
   type CreateWorktreeOptions,
+  type InteractiveSandboxProvider,
   type RunResult,
   type Sandbox,
   type Worktree,
@@ -9,13 +10,14 @@ import {
   type WorktreeInteractiveOptions,
   type WorktreeRunOptions,
 } from "../core";
-import { NotImplementedError } from "../core";
+import { noSandbox } from "../sandboxes/no-sandbox";
 import {
   createSandboxFromWorktree,
   type CreateSandboxSeams,
 } from "./create-sandbox";
 import { resolveEnv } from "./env-resolver";
 import { gitCurrentBranch } from "./git";
+import { runInteractiveSession } from "./interactive-program";
 import { join } from "node:path";
 import { createWorktreeStrategy, type WorktreeStrategy } from "./worktree-strategy";
 
@@ -149,12 +151,35 @@ function makeWorktreeHandle(input: MakeWorktreeHandleInput): Worktree {
   };
 
   const wtInteractive = async (
-    _options: WorktreeInteractiveOptions,
+    options: WorktreeInteractiveOptions,
   ): Promise<void> => {
     ensureOpen();
-    // Deferred to #18 (Interactive + noSandbox). Type-level acceptance of
-    // all three sandbox kinds is already in `WorktreeInteractiveOptions`.
-    throw new NotImplementedError("Worktree.interactive");
+    // Per ADR-0010: `wt.interactive()` runs over the worktree this
+    // `Worktree` already owns; we never tear it down. The provider
+    // defaults to `noSandbox()` (CONTEXT.md / brief).
+    const provider: InteractiveSandboxProvider = options.sandbox ?? noSandbox();
+    const env = await resolveEnv({
+      processEnv: process.env,
+      sandduneEnvPath: join(hostRepoPath, ".sanddune", ".env"),
+      agentEnv: options.agent.env,
+      sandboxEnv: provider.env,
+      runOptionsEnv: options.env,
+    });
+
+    await runInteractiveSession({
+      agent: options.agent,
+      provider,
+      strategy,
+      branchStrategy: input.branchStrategy,
+      hostRepoPath,
+      env,
+      promptInput: extractWorktreePromptInput(options),
+      hooks: options.hooks,
+      timeouts: options.timeouts ?? input.creationTimeouts,
+      copyToWorktree: options.copyToWorktree ?? input.creationCopyToWorktree,
+      signal: options.signal,
+      ownsWorktree: false,
+    });
   };
 
   const wtCreateSandbox = async (
@@ -220,4 +245,22 @@ function makeWorktreeHandle(input: MakeWorktreeHandleInput): Worktree {
       await close();
     },
   };
+}
+
+function extractWorktreePromptInput(options: WorktreeInteractiveOptions): {
+  prompt?: string;
+  promptFile?: string;
+  promptArgs?: Readonly<Record<string, string | number>>;
+} {
+  const result: {
+    prompt?: string;
+    promptFile?: string;
+    promptArgs?: Readonly<Record<string, string | number>>;
+  } = {};
+  if (typeof options.prompt === "string") result.prompt = options.prompt;
+  if (typeof options.promptFile === "string") {
+    result.promptFile = options.promptFile;
+  }
+  if (options.promptArgs !== undefined) result.promptArgs = options.promptArgs;
+  return result;
 }

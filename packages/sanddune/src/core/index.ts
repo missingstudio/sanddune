@@ -22,6 +22,7 @@ export type {
 
 export type {
   AgentBuildCommandInput,
+  AgentInteractiveCommandInput,
   AgentProvider,
   AgentSessionCapture,
   AgentStreamEvent,
@@ -33,6 +34,8 @@ export type {
   BindMountSandboxHandle,
   BindMountSandboxProvider,
   CreateSandboxProvider,
+  ExecInteractiveOptions,
+  ExecInteractiveResult,
   ExecOptions,
   ExecResult,
   InteractiveSandboxProvider,
@@ -48,7 +51,11 @@ export type { SandboxHooks } from "./hooks";
 
 export type { Timeouts } from "./timeouts";
 export type { LoggingOption } from "./logging";
-export type { PromptArgs, PromptOption } from "./prompt";
+export type {
+  OptionalPromptOption,
+  PromptArgs,
+  PromptOption,
+} from "./prompt";
 
 export { BUILT_IN_PROMPT_ARGS, preparePromptPipeline } from "./prompt-pipeline";
 export type {
