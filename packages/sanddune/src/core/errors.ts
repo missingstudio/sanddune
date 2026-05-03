@@ -26,3 +26,29 @@ export class AgentIdleTimeoutError extends Error {
     this.iteration = params.iteration;
   }
 }
+
+export class HookTimeoutError extends Error {
+  readonly _tag = "HookTimeoutError" as const;
+  readonly command: string;
+  readonly timeoutMs: number;
+
+  constructor(params: { command: string; timeoutMs: number }) {
+    super(
+      `Hook timed out after ${params.timeoutMs}ms: ${params.command}`,
+    );
+    this.name = "HookTimeoutError";
+    this.command = params.command;
+    this.timeoutMs = params.timeoutMs;
+  }
+}
+
+export class CopyToWorktreeTimeoutError extends Error {
+  readonly _tag = "CopyToWorktreeTimeoutError" as const;
+  readonly timeoutMs: number;
+
+  constructor(params: { timeoutMs: number }) {
+    super(`copyToWorktree timed out after ${params.timeoutMs}ms`);
+    this.name = "CopyToWorktreeTimeoutError";
+    this.timeoutMs = params.timeoutMs;
+  }
+}

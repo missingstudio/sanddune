@@ -1,22 +1,19 @@
-export interface HostHook {
-  readonly command: string;
-}
-
-export interface SandboxHook {
-  readonly command: string;
-  readonly sudo?: boolean;
-}
-
-export interface HostHooks {
-  readonly onWorktreeReady?: HostHook | readonly HostHook[];
-  readonly onSandboxReady?: HostHook | readonly HostHook[];
-}
-
-export interface InSandboxHooks {
-  readonly onSandboxReady?: SandboxHook | readonly SandboxHook[];
-}
-
-export interface SandboxHooks {
-  readonly host?: HostHooks;
-  readonly sandbox?: InSandboxHooks;
-}
+export type SandboxHooks = {
+  readonly host?: {
+    readonly onWorktreeReady?: ReadonlyArray<{
+      readonly command: string;
+      readonly timeoutMs?: number;
+    }>;
+    readonly onSandboxReady?: ReadonlyArray<{
+      readonly command: string;
+      readonly timeoutMs?: number;
+    }>;
+  };
+  readonly sandbox?: {
+    readonly onSandboxReady?: ReadonlyArray<{
+      readonly command: string;
+      readonly sudo?: boolean;
+      readonly timeoutMs?: number;
+    }>;
+  };
+};
