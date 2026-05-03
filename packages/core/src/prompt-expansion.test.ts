@@ -109,12 +109,18 @@ describe("expandPrompt", () => {
     expect(result.text).toBe("x:y");
   });
 
-  test("only the final newline is trimmed — interior newlines are preserved", async () => {
-    const result = await expandPrompt({
+  test("trailing newlines are trimmed; interior newlines are preserved", async () => {
+    const single = await expandPrompt({
       text: "log: !`git log`",
       exec: async () => ok("line1\nline2\nline3\n"),
     });
-    expect(result.text).toBe("log: line1\nline2\nline3");
+    expect(single.text).toBe("log: line1\nline2\nline3");
+
+    const multi = await expandPrompt({
+      text: "x: !`cmd`",
+      exec: async () => ok("foo\n\n\n"),
+    });
+    expect(multi.text).toBe("x: foo");
   });
 
   test("two adjacent markers with no separator both expand", async () => {
@@ -123,5 +129,34 @@ describe("expandPrompt", () => {
       exec: async (cmd) => ok(`${cmd}\n`),
     });
     expect(result.text).toBe("ab");
+  });
+
+  test("empty shell expression !`` is rejected before any exec dispatches", async () => {
+    await expect(
+      expandPrompt({
+        text: "before !`` after",
+        exec: failingExec,
+      }),
+    ).rejects.toThrow(/empty shell expression/i);
+  });
+
+  test("exec rejection is wrapped with the offending command", async () => {
+    let caught: unknown;
+    const sandboxDied = new Error("sandbox connection closed");
+    try {
+      await expandPrompt({
+        text: "result: !`gh issue view 42`",
+        exec: async () => {
+          throw sandboxDied;
+        },
+      });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    const err = caught as Error;
+    expect(err.message).toContain("!`gh issue view 42`");
+    expect(err.message).toContain("sandbox connection closed");
+    expect(err.cause).toBe(sandboxDied);
   });
 });
