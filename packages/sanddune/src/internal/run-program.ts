@@ -7,6 +7,7 @@ import {
   type RunOptions,
   type RunResult,
   type RunSandboxProvider,
+  type WorktreePlan,
 } from "@missingstudio/sanddune-core";
 import { resolveEnv } from "./env-resolver";
 import { gitCurrentBranch, gitHeadSha, gitNewCommits } from "./git";
@@ -100,8 +101,7 @@ export async function runProgram(
     const commits = await gitNewCommits(cwd, beforeSha);
 
     resultBase = {
-      sourceBranch: strategy.sourceBranch,
-      targetBranch: strategy.targetBranch,
+      branch: resultBranchFor(plan),
       iterations: loopResult.iterations,
       commits,
       stdout: loopResult.stdout,
@@ -126,6 +126,16 @@ export async function runProgram(
   return preservedPath !== undefined
     ? { ...resultBase, worktreePath: preservedPath }
     : resultBase;
+}
+
+function resultBranchFor(plan: WorktreePlan): string {
+  switch (plan.type) {
+    case "head":
+    case "merge-to-head":
+      return plan.targetBranch;
+    case "branch":
+      return plan.sourceBranch;
+  }
 }
 
 async function closeHandleSafely(

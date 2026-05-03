@@ -87,8 +87,7 @@ describe("runProgram (integration)", () => {
     expect(result.iterations).toHaveLength(1);
     expect(result.commits).toHaveLength(1);
     expect(result.iterations[0]?.commitSha).toBe(result.commits[0]);
-    expect(result.sourceBranch).toBe("main");
-    expect(result.targetBranch).toBe("main");
+    expect(result.branch).toBe("main");
     expect(result.stdout).toBe("did the thing\n");
     expect(result.logFilePath).toMatch(/\.sanddune\/logs\/.+\.jsonl$/);
     expect(closeCalls).toEqual([1]);
@@ -185,10 +184,10 @@ describe("runProgram (integration)", () => {
     expect(result.commits[0]).toBe(headAfter);
     expect(headAfter).not.toBe(headBeforeRun);
 
-    // sourceBranch is the temp branch the manager created; targetBranch is
-    // the host's branch at run() time.
-    expect(result.sourceBranch).toMatch(/^sanddune\/merge-to-head\//);
-    expect(result.targetBranch).toBe("main");
+    // For merge-to-head, branch is the host branch the commits ended up on
+    // (after fast-forward back from the temp source branch). The temp branch
+    // itself is no longer surfaced on RunResult.
+    expect(result.branch).toBe("main");
 
     // Clean worktree was removed; no preservation surface on the result.
     expect(result.worktreePath).toBeUndefined();
@@ -260,8 +259,10 @@ describe("runProgram (integration)", () => {
       agentInvokerLayer: Layer.succeed(AgentInvoker, fakeInvoker),
     });
 
-    // The committed change still merged back to host HEAD.
+    // The committed change still merged back to host HEAD — branch reports
+    // where the commits landed, not the preserved temp source branch.
     expect(result.commits).toHaveLength(1);
+    expect(result.branch).toBe("main");
 
     // Worktree was preserved on disk; result surfaces the path.
     expect(result.worktreePath).toBeDefined();

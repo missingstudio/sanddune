@@ -31,8 +31,7 @@ export interface IterationResult {
 }
 
 export interface RunResult {
-  readonly sourceBranch: string;
-  readonly targetBranch: string;
+  readonly branch: string;
   readonly worktreePath?: string;
   readonly iterations: readonly IterationResult[];
   readonly commits: readonly string[];

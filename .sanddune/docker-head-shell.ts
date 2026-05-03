@@ -46,8 +46,7 @@ const result = await run({
 const headAfter = git("rev-parse", "HEAD");
 
 console.log("\nrun complete");
-console.log(`  source branch:    ${result.sourceBranch}`);
-console.log(`  target branch:    ${result.targetBranch}`);
+console.log(`  branch:           ${result.branch}`);
 console.log(`  iterations:       ${result.iterations.length}`);
 console.log(`  commits:          ${result.commits.length}`);
 for (const sha of result.commits) console.log(`    ${sha}`);
@@ -70,14 +69,9 @@ if (headAfter === headBefore) {
 if (!existsSync(resolve("HEAD-SHELL.md"))) {
   failures.push("HEAD-SHELL.md is not on the host working tree");
 }
-if (result.sourceBranch !== branchBefore) {
+if (result.branch !== branchBefore) {
   failures.push(
-    `expected sourceBranch == host branch (${branchBefore}), got ${result.sourceBranch}`,
-  );
-}
-if (result.targetBranch !== branchBefore) {
-  failures.push(
-    `expected targetBranch == host branch (${branchBefore}), got ${result.targetBranch}`,
+    `expected branch == host branch (${branchBefore}), got ${result.branch}`,
   );
 }
 
