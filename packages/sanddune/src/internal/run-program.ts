@@ -63,7 +63,13 @@ export async function runProgram(
 
   await runLog.runStarted();
 
-  const beforeSha = await gitHeadSha(cwd);
+  // Capture the pre-run tip of the ref the agent will commit to. For `head`
+  // the worktree path *is* the host cwd, so this is the host HEAD. For
+  // `merge-to-head` the worktree was just created from host HEAD, so its
+  // HEAD matches. For `branch` this is the named branch's tip (or the host
+  // HEAD it was just created from). Anything past this SHA on the worktree's
+  // HEAD after the run is the agent's contribution.
+  const beforeSha = await gitHeadSha(strategy.worktreePath);
 
   let handle: BindMountSandboxHandle | undefined;
   let resultBase: RunResult | undefined;
@@ -98,7 +104,10 @@ export async function runProgram(
     );
 
     await strategy.afterIteration();
-    const commits = await gitNewCommits(cwd, beforeSha);
+    // Read commits off the worktree's HEAD — the worktree (whether host cwd
+    // for `head`, the temp branch for `merge-to-head`, or the named branch
+    // for `branch`) is always where the agent's commits land first.
+    const commits = await gitNewCommits(strategy.worktreePath, beforeSha);
 
     resultBase = {
       branch: resultBranchFor(plan),
