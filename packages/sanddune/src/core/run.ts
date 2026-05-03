@@ -8,11 +8,6 @@ import type {
 } from "./sandbox-provider";
 import type { Timeouts } from "./timeouts";
 
-export interface CopyToWorktree {
-  readonly source: string;
-  readonly destination?: string;
-}
-
 export type CompletionSignal = string;
 
 export interface IterationUsage {
@@ -60,5 +55,5 @@ export type RunOptions<S extends RunSandboxProvider = RunSandboxProvider> =
     readonly logging?: LoggingOption;
     readonly signal?: AbortSignal;
     readonly resumeSession?: string;
-    readonly copyToWorktree?: readonly (string | CopyToWorktree)[];
+    readonly copyToWorktree?: readonly string[];
   };

@@ -159,9 +159,34 @@ const result = await run({
 
 Exactly one of `prompt` / `promptFile` is required. On the template path, sanddune performs host-side `{{KEY}}` substitution before the agent runs: every `{{KEY}}` placeholder is replaced with its value from `promptArgs`, plus the built-in arguments `{{SOURCE_BRANCH}}` and `{{TARGET_BRANCH}}` (resolved from the active branch strategy). Passing `SOURCE_BRANCH` or `TARGET_BRANCH` in `promptArgs` throws — built-ins cannot be overridden. A `{{KEY}}` with no matching arg throws naming the key; unused `promptArgs` keys log a warning. Inline `prompt` skips substitution entirely (per ADR-0008), and combining `prompt` with `promptArgs` throws. Templates can also embed `` !`command` `` shell expressions, evaluated in parallel inside the sandbox before each iteration; substitution runs first, so `{{KEY}}` placeholders inside shell expressions are valid (e.g. `` !`gh issue view {{ISSUE}}` ``). All of this is owned by the `preparePromptPipeline()` module, exported from `@missingstudio/sanddune` for callers who want to reuse the host-side validation outside `run()`.
 
+#### Lifecycle hooks and `copyToWorktree`
+
+`copyToWorktree` accepts a list of host paths (relative paths resolve against `cwd`, the target-repo perspective; absolute paths are used as-is) that are copied into the worktree before any hook fires. Rejected at runtime with `branchStrategy: { type: "head" }` — there is no separate worktree to copy into.
+
+`hooks` runs in this order: `host.onWorktreeReady` (sequential) → sandbox created → `host.onSandboxReady ∥ sandbox.onSandboxReady` (parallel; the two sides are not coordinated, so setup that needs ordering across host/sandbox must live entirely on one side). Host hooks are `{ command, timeoutMs? }`; sandbox hooks add `{ sudo? }`. Per-hook timeout defaults to `60_000ms` and is caller-overridable via `timeoutMs`. The `copyToWorktree` step has its own timeout (`timeouts.copyToWorktreeMs`, default `60_000ms`). Non-zero exit fails the run with the offending command and exit code; the caller `signal` is threaded into every hook so abort kills in-flight commands.
+
+```typescript
+await run({
+  agent: claudeCode("claude-opus-4-7"),
+  sandbox: docker(),
+  branchStrategy: { type: "merge-to-head" },
+  prompt: "...",
+  copyToWorktree: [".env.example", "fixtures/"],
+  hooks: {
+    host: {
+      onWorktreeReady: [{ command: "cp .env.example .env" }],
+    },
+    sandbox: {
+      onSandboxReady: [{ command: "bun install", timeoutMs: 120_000 }],
+    },
+  },
+  timeouts: { copyToWorktreeMs: 30_000 },
+});
+```
+
 #### Accepted by the type but not yet wired
 
-`hooks`, `timeouts`, `logging`, `resumeSession`, `copyToWorktree`. Silently ignored. Don't depend on them.
+`timeouts.idleSeconds`, `timeouts.totalSeconds`, `logging`, `resumeSession`. Silently ignored. Don't depend on them.
 
 ### `RunResult`
 

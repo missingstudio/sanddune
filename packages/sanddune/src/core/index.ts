@@ -1,4 +1,9 @@
-export { AgentIdleTimeoutError, NotImplementedError } from "./errors";
+export {
+  AgentIdleTimeoutError,
+  CopyToWorktreeTimeoutError,
+  HookTimeoutError,
+  NotImplementedError,
+} from "./errors";
 export { AgentInvoker } from "./agent-invoker";
 
 export type {
@@ -38,13 +43,7 @@ export type {
   SandboxProvider,
 } from "./sandbox-provider";
 
-export type {
-  HostHook,
-  HostHooks,
-  InSandboxHooks,
-  SandboxHook,
-  SandboxHooks,
-} from "./hooks";
+export type { SandboxHooks } from "./hooks";
 
 export type { Timeouts } from "./timeouts";
 export type { LoggingOption } from "./logging";
@@ -60,7 +59,6 @@ export type {
 
 export type {
   CompletionSignal,
-  CopyToWorktree,
   IterationResult,
   IterationUsage,
   RunOptions,

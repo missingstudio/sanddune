@@ -11,6 +11,11 @@ import {
 import { resolveEnv } from "./env-resolver";
 import { gitCurrentBranch, gitHeadSha } from "./git";
 import { makeProductionAgentInvoker } from "./agent-invoker-live";
+import { runCopyToWorktree } from "./copy-to-worktree";
+import {
+  runHostHooksSequential,
+  runOnSandboxReadyParallel,
+} from "./hook-runner";
 import { runIterationLoop } from "./iteration-loop";
 import { runEffect } from "./run-effect";
 import { openRunSession, type RunSession } from "./run-session";
@@ -48,9 +53,10 @@ export async function runProgram(
     runOptionsEnv: options.env,
   });
   const targetBranch = await gitCurrentBranch(cwd);
+  const branchStrategy = options.branchStrategy ?? { type: "head" };
 
   const strategy = await createWorktreeStrategy({
-    strategy: options.branchStrategy ?? { type: "head" },
+    strategy: branchStrategy,
     providerKind: provider.kind,
     cwd,
     hostBranch: targetBranch,
@@ -85,6 +91,23 @@ export async function runProgram(
 
     session = await openRunSession(cwd);
 
+    // Lifecycle (CONTEXT.md): copyToWorktree → host.onWorktreeReady →
+    // sandbox created → host.onSandboxReady ∥ sandbox.onSandboxReady.
+    // All threaded with the caller's signal so abort cancels mid-step.
+    await runCopyToWorktree({
+      items: options.copyToWorktree,
+      cwd,
+      worktreePath: strategy.worktreePath,
+      branchStrategy,
+      timeoutMs: options.timeouts?.copyToWorktreeMs,
+      signal: options.signal,
+    });
+
+    await runHostHooksSequential(
+      options.hooks?.host?.onWorktreeReady,
+      options.signal,
+    );
+
     // Anything past this SHA on the worktree's HEAD after the loop is the
     // agent's contribution.
     const beforeSha = await gitHeadSha(strategy.worktreePath);
@@ -93,6 +116,13 @@ export async function runProgram(
       worktreePath: strategy.worktreePath,
       hostRepoPath: cwd,
       env,
+    });
+
+    await runOnSandboxReadyParallel({
+      hostHooks: options.hooks?.host?.onSandboxReady,
+      sandboxHooks: options.hooks?.sandbox?.onSandboxReady,
+      handle,
+      signal: options.signal,
     });
 
     const agentInvokerLayer =

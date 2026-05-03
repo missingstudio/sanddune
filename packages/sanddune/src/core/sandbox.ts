@@ -7,7 +7,7 @@ import type {
   ExecResult,
 } from "./sandbox-provider";
 import type { Timeouts } from "./timeouts";
-import type { CopyToWorktree, RunResult } from "./run";
+import type { RunResult } from "./run";
 
 export interface CreateSandboxOptions<
   S extends CreateSandboxProvider = CreateSandboxProvider,
@@ -20,7 +20,7 @@ export interface CreateSandboxOptions<
   readonly hooks?: SandboxHooks;
   readonly timeouts?: Timeouts;
   readonly logging?: LoggingOption;
-  readonly copyToWorktree?: readonly (string | CopyToWorktree)[];
+  readonly copyToWorktree?: readonly string[];
 }
 
 export type SandboxRunOptions = PromptOption & {

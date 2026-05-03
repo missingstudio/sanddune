@@ -9,7 +9,7 @@ import type {
   RunSandboxProvider,
 } from "./sandbox-provider";
 import type { Timeouts } from "./timeouts";
-import type { CopyToWorktree, RunResult } from "./run";
+import type { RunResult } from "./run";
 import type { Sandbox } from "./sandbox";
 
 export interface CreateWorktreeOptions {
@@ -30,7 +30,7 @@ export type WorktreeRunOptions<
   readonly timeouts?: Timeouts;
   readonly logging?: LoggingOption;
   readonly signal?: AbortSignal;
-  readonly copyToWorktree?: readonly (string | CopyToWorktree)[];
+  readonly copyToWorktree?: readonly string[];
 };
 
 export type WorktreeInteractiveOptions<
@@ -41,7 +41,7 @@ export type WorktreeInteractiveOptions<
   readonly env?: Readonly<Record<string, string>>;
   readonly hooks?: SandboxHooks;
   readonly timeouts?: Timeouts;
-  readonly copyToWorktree?: readonly (string | CopyToWorktree)[];
+  readonly copyToWorktree?: readonly string[];
 };
 
 export interface WorktreeCreateSandboxOptions<
@@ -53,7 +53,7 @@ export interface WorktreeCreateSandboxOptions<
   readonly hooks?: SandboxHooks;
   readonly timeouts?: Timeouts;
   readonly logging?: LoggingOption;
-  readonly copyToWorktree?: readonly (string | CopyToWorktree)[];
+  readonly copyToWorktree?: readonly string[];
 }
 
 export interface Worktree {
