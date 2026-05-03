@@ -1,4 +1,4 @@
-export { NotImplementedError } from "./errors";
+export { AgentIdleTimeoutError, NotImplementedError } from "./errors";
 export { AgentInvoker } from "./agent-invoker";
 
 export type {

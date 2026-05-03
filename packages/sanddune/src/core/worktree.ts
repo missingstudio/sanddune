@@ -25,6 +25,7 @@ export type WorktreeRunOptions<
   readonly env?: Readonly<Record<string, string>>;
   readonly maxIterations?: number;
   readonly completionSignal?: string | readonly string[];
+  readonly idleTimeoutSeconds?: number;
   readonly hooks?: SandboxHooks;
   readonly timeouts?: Timeouts;
   readonly logging?: LoggingOption;

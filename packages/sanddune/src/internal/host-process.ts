@@ -13,6 +13,10 @@ export interface SpawnHostOptions {
    *  arrives instead of buffered. The captured `stdout` in the result is
    *  then `lines.join("\n")` (no trailing newline). */
   readonly onLine?: (line: string) => void;
+  /** When the signal aborts, the subprocess is killed (SIGTERM) and the
+   *  promise rejects with `signal.reason` verbatim. Pre-aborted signals
+   *  reject before spawn. */
+  readonly signal?: AbortSignal;
 }
 
 /** Never throws on non-zero exit — callers decide what's an error.
@@ -24,6 +28,12 @@ export function spawnHost(
   options?: SpawnHostOptions,
 ): Promise<ProcessResult> {
   return new Promise((resolvePromise, reject) => {
+    const signal = options?.signal;
+    if (signal?.aborted) {
+      reject(signal.reason);
+      return;
+    }
+
     const proc = spawn(cmd, args, {
       cwd: options?.cwd,
       stdio: ["ignore", "pipe", "pipe"],
@@ -45,8 +55,23 @@ export function spawnHost(
 
     proc.stderr?.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
 
-    proc.on("error", reject);
+    let aborted = false;
+    const onAbort = () => {
+      aborted = true;
+      proc.kill("SIGTERM");
+    };
+    if (signal) signal.addEventListener("abort", onAbort, { once: true });
+
+    proc.on("error", (error) => {
+      if (signal) signal.removeEventListener("abort", onAbort);
+      reject(error);
+    });
     proc.on("close", (code) => {
+      if (signal) signal.removeEventListener("abort", onAbort);
+      if (aborted) {
+        reject(signal!.reason);
+        return;
+      }
       const stdout = options?.onLine
         ? stdoutLines.join("\n")
         : Buffer.concat(stdoutChunks).toString("utf8");
