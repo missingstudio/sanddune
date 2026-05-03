@@ -70,6 +70,10 @@ _Avoid_: "working branch", "agent branch"
 The **host**'s active branch at `run()` time -- the branch sanddune merges into when using **merge-to-head**.
 _Avoid_: "base branch", "destination branch", "merge target"
 
+**Result branch**:
+The branch where a `run()`'s commits live after completion. Surfaced as `RunResult.branch`. For **head**, equal to the **host**'s HEAD at `run()` time. For **merge-to-head**, equal to the **target branch** (the merge target, after the fast-forward back from the temp **source branch**). For **branch**, equal to the named branch supplied by the caller. The **source branch** is not surfaced on `RunResult` -- in the dirty **merge-to-head** case it is preserved on disk and reachable via `RunResult.worktreePath`.
+_Avoid_: "final branch", "output branch", "head branch" (ambiguous with the **head** strategy)
+
 ### Agents
 
 **Agent provider**:
@@ -244,6 +248,7 @@ _Avoid_: "log event" (the log file contains more than just agent output), "displ
 - If a user passes `SOURCE_BRANCH` or `TARGET_BRANCH` in `promptArgs`, **prompt argument substitution** fails with an error -- **built-in prompt arguments** cannot be overridden
 - **Target branch** defaults to the **host**'s current branch at `run()` time (via `git rev-parse --abbrev-ref HEAD`)
 - **Source branch** is either the explicitly provided `branch` option or a sanddune-generated temp branch
+- `RunResult.branch` is the **result branch** -- equal to the **target branch** for **head** and **merge-to-head** (after merge-back), and the named branch for the **branch** strategy. The **source branch** is not surfaced on `RunResult`; in the dirty **merge-to-head** case the preserved temp branch is reachable by `cd`-ing into `RunResult.worktreePath` and running `git symbolic-ref --short HEAD`
 - **Log-to-file mode** is the default for programmatic use via `run()`; **terminal mode** is used when passing `logging: { type: 'stdout' }` to `run()`
 - In **log-to-file mode**, sanddune writes a **run log** to `.sanddune/logs/` and prints a `tail -f` command to the console
 - In **terminal mode**, sanddune renders spinners, styled status messages, and summaries directly in the terminal
