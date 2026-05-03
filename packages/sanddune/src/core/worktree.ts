@@ -10,11 +10,13 @@ import type {
 } from "./sandbox-provider";
 import type { Timeouts } from "./timeouts";
 import type { RunResult } from "./run";
-import type { Sandbox } from "./sandbox";
+import type { CloseResult, Sandbox } from "./sandbox";
 
 export interface CreateWorktreeOptions {
+  readonly branchStrategy: NonHeadBranchStrategy;
   readonly cwd?: string;
-  readonly branchStrategy?: NonHeadBranchStrategy;
+  readonly copyToWorktree?: readonly string[];
+  readonly timeouts?: Timeouts;
 }
 
 export type WorktreeRunOptions<
@@ -57,11 +59,16 @@ export interface WorktreeCreateSandboxOptions<
 }
 
 export interface Worktree {
-  readonly path: string;
+  readonly worktreePath: string;
   readonly branch: string;
   readonly branchStrategy: NonHeadBranchStrategy;
   run(options: WorktreeRunOptions): Promise<RunResult>;
   interactive(options: WorktreeInteractiveOptions): Promise<void>;
   createSandbox(options: WorktreeCreateSandboxOptions): Promise<Sandbox>;
-  close(): Promise<void>;
+  /** Tears down only the worktree (ADR-0010 — sandboxes spawned via
+   *  `wt.createSandbox()` must be closed by the caller first). Dirty
+   *  worktrees are preserved on disk and surfaced via
+   *  `CloseResult.preservedWorktreePath`. */
+  close(): Promise<CloseResult>;
+  [Symbol.asyncDispose](): Promise<void>;
 }

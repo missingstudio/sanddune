@@ -1,19 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { NotImplementedError } from "./core";
-import { createWorktree, interactive } from "./index";
+import { interactive } from "./index";
 import { docker } from "./sandboxes/docker";
 import { noSandbox } from "./sandboxes/no-sandbox";
 import { podman } from "./sandboxes/podman";
 import { vercel } from "./sandboxes/vercel";
 
 describe("entry-point stubs throw NotImplementedError", () => {
-  test("createWorktree", () => {
-    expect(() => createWorktree()).toThrow(NotImplementedError);
-    expect(() => createWorktree()).toThrow(
-      /^createWorktree is not implemented$/,
-    );
-  });
-
   test("interactive", () => {
     expect(() => interactive({} as never)).toThrow(NotImplementedError);
     expect(() => interactive({} as never)).toThrow(

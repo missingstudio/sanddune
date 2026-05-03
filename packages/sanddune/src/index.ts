@@ -12,6 +12,7 @@ import type {
   Worktree,
 } from "./core";
 import { createSandboxProgram } from "./internal/create-sandbox-program";
+import { createWorktreeProgram } from "./internal/create-worktree-program";
 import { runProgram } from "./internal/run-program";
 
 export * from "./core";
@@ -32,9 +33,9 @@ export function createSandbox<S extends CreateSandboxProvider>(
 }
 
 export function createWorktree(
-  _options?: CreateWorktreeOptions,
+  options: CreateWorktreeOptions,
 ): Promise<Worktree> {
-  throw new NotImplementedError("createWorktree");
+  return createWorktreeProgram(options);
 }
 
 export function interactive<S extends InteractiveSandboxProvider>(
