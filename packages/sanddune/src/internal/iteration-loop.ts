@@ -27,8 +27,10 @@ export interface IterationLoopInput {
    *  as the reason and the iteration's call to the agent rejects. */
   readonly idleTimeoutSeconds: number;
   readonly sandboxExec: SandboxExec;
-  /** Checked between iterations; mid-iteration kill of the agent subprocess
-   *  needs `signal` threaded into `spawnHost` and is a follow-up. */
+  /** Caller-supplied abort. Checked at iteration boundaries and composed
+   *  with the per-iteration idle signal so a mid-iteration abort kills the
+   *  agent subprocess (via `spawnHost` SIGTERM) and rejects with
+   *  `signal.reason` verbatim (ADR-0004 / ADR-0011). */
   readonly signal?: AbortSignal;
 }
 
@@ -51,7 +53,10 @@ export const runIterationLoop = (
     let matchedSignal: string | undefined;
 
     for (let iteration = 1; iteration <= input.maxIterations; iteration += 1) {
-      throwIfAborted(input.signal);
+      const aborted = abortReason(input.signal);
+      if (aborted !== undefined) {
+        return yield* Effect.fail(aborted);
+      }
 
       let promptForIteration = input.prompt;
       if (input.promptKind === "template") {
@@ -67,11 +72,15 @@ export const runIterationLoop = (
         idleTimeoutSeconds: input.idleTimeoutSeconds,
         iteration,
       });
+      const composite =
+        input.signal !== undefined
+          ? AbortSignal.any([input.signal, idle.signal])
+          : idle.signal;
       const result = yield* invoker
         .invoke({
           prompt: promptForIteration,
           iteration,
-          signal: idle.signal,
+          signal: composite,
           onEvent: () => idle.reset(),
         })
         .pipe(Effect.ensuring(Effect.sync(() => idle.dispose())));
@@ -129,11 +138,14 @@ const fromPromise = <T>(thunk: () => Promise<T>) =>
     catch: (e) => (e instanceof Error ? e : new Error(String(e))),
   });
 
-function throwIfAborted(signal: AbortSignal | undefined): void {
-  if (!signal?.aborted) return;
+/** Returns the abort reason as an `Error` if the signal has aborted, else
+ *  `undefined`. Non-Error reasons are wrapped so the loop can still surface
+ *  via `Effect.fail`; identity is preserved for the common Error case. */
+function abortReason(signal: AbortSignal | undefined): Error | undefined {
+  if (!signal?.aborted) return undefined;
   const reason = signal.reason;
-  if (reason instanceof Error) throw reason;
-  throw new Error(typeof reason === "string" ? reason : "aborted");
+  if (reason instanceof Error) return reason;
+  return new Error(typeof reason === "string" ? reason : "aborted");
 }
 
 interface IdleTimer {

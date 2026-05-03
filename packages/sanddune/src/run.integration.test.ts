@@ -14,6 +14,7 @@ import {
   type RunOptions,
   type RunSandboxProvider,
 } from "./core";
+import { spawnHost } from "./internal/host-process";
 import { runProgram } from "./internal/run-program";
 
 describe("runProgram (integration)", () => {
@@ -829,6 +830,48 @@ describe("runProgram (integration)", () => {
       expect(closeCalls).toEqual([1]);
     });
 
+    test("caller signal mid-iteration kills the agent subprocess (SIGTERM via spawnHost) and rejects with the caller's reason", async () => {
+      // End-to-end coverage of the abort path: caller signal → iteration
+      // loop composes with idle signal → production AgentInvoker forwards to
+      // handle.exec → spawnHost SIGTERMs the subprocess → rejection carries
+      // signal.reason verbatim. Uses the production invoker (no
+      // agentInvokerLayer seam) and a real long-running subprocess.
+      const closeCalls: number[] = [];
+      const provider = makeAsyncBindMountProvider(closeCalls);
+      const agent: AgentProvider = {
+        name: "stub-sleep",
+        // 30s is comfortably longer than the abort delay, the assertion
+        // bound, and the test timeout. If the kill fails, the test will
+        // hang and fail loudly.
+        buildCommand: () => "sleep 30",
+        parseLine: () => [],
+      };
+
+      const controller = new AbortController();
+      const reason = new Error("caller cancelled mid-iteration");
+      // Give the subprocess time to actually start before aborting.
+      setTimeout(() => controller.abort(reason), 100);
+
+      const start = Date.now();
+      await expect(
+        runProgram({
+          agent,
+          sandbox: provider,
+          prompt: "go",
+          cwd: repo,
+          signal: controller.signal,
+        }),
+      ).rejects.toBe(reason);
+
+      const elapsed = Date.now() - start;
+      // The 30s sleep would dominate the elapsed time if the kill didn't
+      // work. Allow generous CI jitter; anything under a few seconds proves
+      // the kill happened.
+      expect(elapsed).toBeLessThan(5_000);
+      // Sandbox was created and torn down even on abort.
+      expect(closeCalls).toEqual([1]);
+    });
+
     test("template prompts get shell expressions expanded before each iteration", async () => {
       const promptFile = join(repo, "expand.md");
       await writeFile(promptFile, "Work on !`echo expanded-token`\n");
@@ -901,6 +944,37 @@ function makeLocalProcessBindMountProvider(
           stdout,
           stderr: result.stderr ?? "",
           exitCode: result.status ?? 0,
+        };
+      },
+      close: async () => {
+        closeCalls.push(1);
+      },
+    }),
+  };
+}
+
+/** Async bind-mount provider whose `exec` goes through `spawnHost`, so the
+ *  inbound `AbortSignal` propagates all the way to the subprocess (SIGTERM
+ *  on abort, rejection with `signal.reason` verbatim). The other helper
+ *  uses `spawnSync` and cannot exercise the kill path. */
+function makeAsyncBindMountProvider(
+  closeCalls: number[],
+): BindMountSandboxProvider {
+  return {
+    kind: "bind-mount",
+    name: "spawnhost-process",
+    create: async ({ worktreePath }) => ({
+      worktreePath,
+      exec: async (command, opts) => {
+        const result = await spawnHost("sh", ["-c", command], {
+          cwd: opts?.cwd ?? worktreePath,
+          ...(opts?.onLine && { onLine: opts.onLine }),
+          ...(opts?.signal && { signal: opts.signal }),
+        });
+        return {
+          stdout: result.stdout,
+          stderr: result.stderr,
+          exitCode: result.exitCode,
         };
       },
       close: async () => {
