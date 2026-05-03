@@ -60,6 +60,16 @@ export type { PromptArgs, PromptOption } from "./prompt";
 export { resolvePrompt } from "./prompt-resolver";
 export type { PromptResolverInput, ResolvedPrompt } from "./prompt-resolver";
 
+export {
+  BUILT_IN_PROMPT_ARGS,
+  substitutePromptArgs,
+} from "./prompt-argument-substitution";
+export type {
+  BuiltInPromptArg,
+  SubstitutePromptArgsInput,
+  SubstitutePromptArgsResult,
+} from "./prompt-argument-substitution";
+
 export type {
   CompletionSignal,
   CopyToWorktree,

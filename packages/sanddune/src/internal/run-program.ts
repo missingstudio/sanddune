@@ -4,6 +4,7 @@ import {
   AgentInvoker,
   resolveBranchStrategy,
   resolvePrompt,
+  substitutePromptArgs,
   type BindMountSandboxHandle,
   type RunOptions,
   type RunResult,
@@ -52,6 +53,22 @@ export async function runProgram(
 
   const strategy = await createWorktreeStrategy({ plan, cwd });
 
+  let promptText = resolvedPrompt.text;
+  if (resolvedPrompt.kind === "template") {
+    const substituted = substitutePromptArgs({
+      text: resolvedPrompt.text,
+      promptArgs: resolvedPrompt.promptArgs,
+      sourceBranch: strategy.sourceBranch,
+      targetBranch: strategy.targetBranch,
+    });
+    promptText = substituted.text;
+    for (const key of substituted.unusedKeys) {
+      process.stderr.write(
+        `sanddune: warning — promptArgs.${key} was not used by the template\n`,
+      );
+    }
+  }
+
   const runId = newRunId();
   const runLog = await openRunLog(cwd, runId);
   process.stdout.write(
@@ -93,7 +110,7 @@ export async function runProgram(
 
     const loopResult = await Effect.runPromise(
       runIterationLoop({
-        prompt: resolvedPrompt.text,
+        prompt: promptText,
         runLog,
         cwd: strategy.worktreePath,
         beforeSha,
