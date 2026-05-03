@@ -3,6 +3,7 @@ import { join, resolve as resolvePath } from "node:path";
 import {
   AgentInvoker,
   resolveBranchStrategy,
+  resolvePrompt,
   type BindMountSandboxHandle,
   type RunOptions,
   type RunResult,
@@ -25,11 +26,7 @@ export async function runProgram(
   options: RunOptions<RunSandboxProvider>,
   seams: RunProgramTestSeams = {},
 ): Promise<RunResult> {
-  if (typeof options.prompt !== "string") {
-    throw new Error(
-      "run() requires an inline `prompt` string in this release. `promptFile` is not yet supported.",
-    );
-  }
+  const resolvedPrompt = await resolvePrompt(options);
   if (options.sandbox.kind !== "bind-mount") {
     throw new Error(
       `run() supports only bind-mount sandbox providers in this release; got ${options.sandbox.kind}.`,
@@ -96,7 +93,7 @@ export async function runProgram(
 
     const loopResult = await Effect.runPromise(
       runIterationLoop({
-        prompt: options.prompt,
+        prompt: resolvedPrompt.text,
         runLog,
         cwd: strategy.worktreePath,
         beforeSha,

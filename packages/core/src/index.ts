@@ -57,6 +57,8 @@ export type {
 export type { Timeouts } from "./timeouts";
 export type { LoggingOption } from "./logging";
 export type { PromptArgs, PromptOption } from "./prompt";
+export { resolvePrompt } from "./prompt-resolver";
+export type { PromptResolverInput, ResolvedPrompt } from "./prompt-resolver";
 
 export type {
   CompletionSignal,
