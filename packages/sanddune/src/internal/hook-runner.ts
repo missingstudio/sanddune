@@ -26,18 +26,51 @@ export async function runHostHooksSequential(
 /** Kicks off `host.onSandboxReady` and `sandbox.onSandboxReady` in parallel.
  *  Within each side the hooks still run sequentially. Per CONTEXT.md the two
  *  sides are not coordinated — setup that needs ordering across host/sandbox
- *  must live entirely on one side. */
+ *  must live entirely on one side.
+ *
+ *  Both sides see a signal that aborts when EITHER the caller aborts OR the
+ *  sibling side rejects. Without that, a fast-failing side would leave the
+ *  other running — orphan sandbox work after `run()` has thrown, and an
+ *  unhandled rejection if the loser later throws too. */
 export async function runOnSandboxReadyParallel(input: {
   readonly hostHooks: ReadonlyArray<HostHook> | undefined;
   readonly sandboxHooks: ReadonlyArray<SandboxHook> | undefined;
   readonly handle: BindMountSandboxHandle;
   readonly signal: AbortSignal | undefined;
 }): Promise<void> {
-  const hostSide = runHostHooksSequential(input.hostHooks, input.signal);
+  const ac = new AbortController();
+  const callerSignal = input.signal;
+  const onCallerAbort = () => ac.abort(callerSignal!.reason);
+  if (callerSignal) {
+    if (callerSignal.aborted) ac.abort(callerSignal.reason);
+    else callerSignal.addEventListener("abort", onCallerAbort, { once: true });
+  }
+
+  let firstError: { value: unknown } | undefined;
+  const recordAndCancel = (e: unknown): never => {
+    if (!firstError) firstError = { value: e };
+    if (!ac.signal.aborted) ac.abort(e);
+    throw e;
+  };
+
+  const hostSide = runHostHooksSequential(input.hostHooks, ac.signal).catch(
+    recordAndCancel,
+  );
   const sandboxSide = input.sandboxHooks
-    ? runSandboxHooksSequential(input.sandboxHooks, input.handle, input.signal)
+    ? runSandboxHooksSequential(
+        input.sandboxHooks,
+        input.handle,
+        ac.signal,
+      ).catch(recordAndCancel)
     : Promise.resolve();
-  await Promise.all([hostSide, sandboxSide]);
+
+  try {
+    await Promise.allSettled([hostSide, sandboxSide]);
+    if (firstError) throw firstError.value;
+  } finally {
+    if (callerSignal)
+      callerSignal.removeEventListener("abort", onCallerAbort);
+  }
 }
 
 async function runSandboxHooksSequential(

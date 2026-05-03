@@ -132,7 +132,7 @@ describe("runCopyToWorktree", () => {
     ).rejects.toThrow(/copyToWorktree failed/);
   });
 
-  test("timeoutMs fires CopyToWorktreeTimeoutError when cp exceeds budget", async () => {
+  test("timeoutMs fires CopyToWorktreeTimeoutError naming the in-flight item", async () => {
     // Generate a fixture cp can't churn through in ms: many small files
     // beats trying to make cp block on FIFOs (macOS cp -R copies the FIFO
     // node without reading it).
@@ -144,16 +144,23 @@ describe("runCopyToWorktree", () => {
       ),
     );
     const start = Date.now();
-    await expect(
-      runCopyToWorktree({
+    let captured: unknown;
+    try {
+      await runCopyToWorktree({
         items: ["many"],
         cwd,
         worktreePath: worktree,
         branchStrategy: { type: "merge-to-head" },
         timeoutMs: 5,
         signal: undefined,
-      }),
-    ).rejects.toBeInstanceOf(CopyToWorktreeTimeoutError);
+      });
+    } catch (e) {
+      captured = e;
+    }
+    expect(captured).toBeInstanceOf(CopyToWorktreeTimeoutError);
+    expect((captured as CopyToWorktreeTimeoutError).currentItem).toBe(
+      join(cwd, "many"),
+    );
     const elapsed = Date.now() - start;
     expect(elapsed).toBeLessThan(10_000);
   });
@@ -177,9 +184,14 @@ describe("runCopyToWorktree", () => {
 
   test("CopyToWorktreeTimeoutError is the typed error class", async () => {
     // Sanity-check the class shape so the wiring is at least exercised.
-    const err = new CopyToWorktreeTimeoutError({ timeoutMs: 60_000 });
+    const err = new CopyToWorktreeTimeoutError({
+      timeoutMs: 60_000,
+      currentItem: "/abs/path/dir",
+    });
     expect(err).toBeInstanceOf(Error);
     expect(err.name).toBe("CopyToWorktreeTimeoutError");
     expect(err.timeoutMs).toBe(60_000);
+    expect(err.currentItem).toBe("/abs/path/dir");
+    expect(err.message).toMatch(/\/abs\/path\/dir/);
   });
 });

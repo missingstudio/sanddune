@@ -32,22 +32,25 @@ export async function runCopyToWorktree(input: {
   }
 
   const timeoutMs = input.timeoutMs ?? DEFAULT_COPY_TIMEOUT_MS;
+  // `currentSource` is read by the timeout factory at fire time, so the
+  // error names whichever item was in flight when the budget expired.
+  let currentSource = "";
   const composed = composeWithTimeout(
     input.signal,
     timeoutMs,
-    () => new CopyToWorktreeTimeoutError({ timeoutMs }),
+    () => new CopyToWorktreeTimeoutError({ timeoutMs, currentItem: currentSource }),
   );
   try {
     for (const item of items) {
-      const source = isAbsolute(item) ? item : resolve(input.cwd, item);
+      currentSource = isAbsolute(item) ? item : resolve(input.cwd, item);
       const result = await spawnHost(
         "cp",
-        ["-R", source, input.worktreePath],
+        ["-R", currentSource, input.worktreePath],
         { signal: composed.signal },
       );
       if (result.exitCode !== 0) {
         throw new Error(
-          `copyToWorktree failed (exit ${result.exitCode}): cp -R ${source} ${input.worktreePath}\n${result.stderr}`,
+          `copyToWorktree failed (exit ${result.exitCode}): cp -R ${currentSource} ${input.worktreePath}\n${result.stderr}`,
         );
       }
     }
