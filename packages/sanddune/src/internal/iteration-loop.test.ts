@@ -550,6 +550,36 @@ describe("runIterationLoop", () => {
       expect(observed).toHaveLength(6);
     });
 
+    test("caller signal never fires → idle timeout still fires (regression check)", async () => {
+      const { invoker } = makeStreamingInvoker([
+        { events: [{ event: textEvent("never seen", 1), afterMs: 5_000 }] },
+      ]);
+      const { log } = makeFakeRunLog();
+      const controller = new AbortController();
+
+      const promise = runLoop(
+        {
+          prompt: "go",
+          promptKind: "inline",
+          runLog: log,
+          cwd: repo,
+          beforeSha: headSha(repo),
+          maxIterations: 1,
+          completionSignals: [],
+          idleTimeoutSeconds: 0.1,
+          sandboxExec: EXEC_NEVER,
+          signal: controller.signal,
+        },
+        invoker,
+      );
+
+      await expect(promise).rejects.toMatchObject({
+        name: "AgentIdleTimeoutError",
+        idleTimeoutSeconds: 0.1,
+        iteration: 1,
+      });
+    });
+
     test("active stream then silence → fires only after the silence period", async () => {
       // Three quick events, then a 5s gap that the 100ms timer must catch.
       const { invoker, observed } = makeStreamingInvoker([
@@ -591,6 +621,153 @@ describe("runIterationLoop", () => {
       expect(elapsed).toBeLessThan(2_000);
       // The three pre-silence events were observed before the timer fired.
       expect(observed).toHaveLength(3);
+    });
+  });
+
+  describe("caller-supplied signal", () => {
+    test("pre-aborted signal → loop rejects with reason; invoker is never called", async () => {
+      const { invoker, calls } = makeScriptedInvoker([
+        { events: [textEvent("should not run\n", 1)] },
+      ]);
+      const { log } = makeFakeRunLog();
+      const controller = new AbortController();
+      const reason = new Error("user cancelled");
+      controller.abort(reason);
+
+      const promise = runLoop(
+        {
+          prompt: "go",
+          promptKind: "inline",
+          runLog: log,
+          cwd: repo,
+          beforeSha: headSha(repo),
+          maxIterations: 3,
+          completionSignals: [],
+          idleTimeoutSeconds: NEVER_FIRES,
+          sandboxExec: EXEC_NEVER,
+          signal: controller.signal,
+        },
+        invoker,
+      );
+
+      await expect(promise).rejects.toBe(reason);
+      expect(calls).toEqual([]);
+    });
+
+    test("signal fires before iteration 1 starts → loop rejects with reason; invoker is never called", async () => {
+      const { invoker, calls } = makeScriptedInvoker([
+        { events: [textEvent("should not run\n", 1)] },
+      ]);
+      const { log } = makeFakeRunLog();
+      const controller = new AbortController();
+      const reason = new Error("cancelled before start");
+
+      // Schedule the abort to fire on the next microtask, before the loop's
+      // first throwIfAborted check runs synchronously inside the Effect.
+      // To make this deterministic, abort synchronously after constructing
+      // the input but before running — equivalent semantically to "the
+      // signal fired between options-build and loop-start".
+      controller.abort(reason);
+
+      const promise = runLoop(
+        {
+          prompt: "go",
+          promptKind: "inline",
+          runLog: log,
+          cwd: repo,
+          beforeSha: headSha(repo),
+          maxIterations: 3,
+          completionSignals: [],
+          idleTimeoutSeconds: NEVER_FIRES,
+          sandboxExec: EXEC_NEVER,
+          signal: controller.signal,
+        },
+        invoker,
+      );
+
+      await expect(promise).rejects.toBe(reason);
+      expect(calls).toEqual([]);
+    });
+
+    test("signal fires mid-iteration → loop rejects with reason; later iterations do not run", async () => {
+      const reason = new Error("user aborted mid-iteration");
+      const controller = new AbortController();
+      // The streaming invoker honors its inbound signal via waitOrAbort —
+      // exactly the contract the production invoker gets via spawnHost.
+      const { invoker, observed } = makeStreamingInvoker([
+        {
+          events: [
+            { event: textEvent("starting\n", 1), afterMs: 30 },
+            // Long wait that the abort will interrupt.
+            { event: textEvent("never seen", 1), afterMs: 5_000 },
+          ],
+        },
+        {
+          events: [{ event: textEvent("should not run", 2), afterMs: 10 }],
+        },
+      ]);
+      const { log } = makeFakeRunLog();
+
+      // Fire the caller's signal once the first event has been observed —
+      // confirms the invoker is mid-flight when abort happens.
+      setTimeout(() => controller.abort(reason), 100);
+
+      const start = Date.now();
+      const promise = runLoop(
+        {
+          prompt: "go",
+          promptKind: "inline",
+          runLog: log,
+          cwd: repo,
+          beforeSha: headSha(repo),
+          maxIterations: 2,
+          completionSignals: [],
+          idleTimeoutSeconds: NEVER_FIRES,
+          sandboxExec: EXEC_NEVER,
+          signal: controller.signal,
+        },
+        invoker,
+      );
+
+      await expect(promise).rejects.toBe(reason);
+      const elapsed = Date.now() - start;
+      // Aborted well before the 5_000ms scripted wait would have completed.
+      expect(elapsed).toBeLessThan(2_000);
+      // First event was observed; second iteration never started.
+      expect(observed).toEqual([textEvent("starting\n", 1)]);
+    });
+
+    test("caller signal beats idle timer → rejects with caller's reason, not AgentIdleTimeoutError", async () => {
+      const reason = new Error("caller wins the race");
+      const controller = new AbortController();
+      const { invoker } = makeStreamingInvoker([
+        {
+          // Long wait so neither completion nor an event happens before abort.
+          events: [{ event: textEvent("never seen", 1), afterMs: 5_000 }],
+        },
+      ]);
+      const { log } = makeFakeRunLog();
+
+      // Caller fires at 50ms; idle timer would fire at 600ms.
+      setTimeout(() => controller.abort(reason), 50);
+
+      const promise = runLoop(
+        {
+          prompt: "go",
+          promptKind: "inline",
+          runLog: log,
+          cwd: repo,
+          beforeSha: headSha(repo),
+          maxIterations: 1,
+          completionSignals: [],
+          idleTimeoutSeconds: 0.6,
+          sandboxExec: EXEC_NEVER,
+          signal: controller.signal,
+        },
+        invoker,
+      );
+
+      await expect(promise).rejects.toBe(reason);
     });
   });
 });
