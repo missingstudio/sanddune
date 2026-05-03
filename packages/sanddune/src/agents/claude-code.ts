@@ -42,6 +42,12 @@ export function claudeCode(
       return args.join(" ");
     },
     parseLine: (line, iteration) => parseClaudeCodeLine(line, iteration),
+    buildInteractiveCommand: ({ prompt, skipPermissions }) => {
+      const args = ["claude", "--model", shellQuote(model)];
+      if (skipPermissions) args.push("--dangerously-skip-permissions");
+      if (prompt !== undefined) args.push(shellQuote(prompt));
+      return args.join(" ");
+    },
   };
 }
 

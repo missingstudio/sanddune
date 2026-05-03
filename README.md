@@ -38,7 +38,9 @@ A TypeScript library for orchestrating AI coding agents in isolated sandboxes.
 | `IterationResult.usage`              | ✅ shipped | Raw token counts parsed from captured Claude session JSONL (per ADR-0005b)       |
 | Custom bind-mount provider           | ✅ shipped | Build your own by constructing a `BindMountSandboxProvider` |
 | `createSandbox()`                   | ✅ shipped | Long-lived reusable sandbox on a single branch; multiple `sandbox.run()` calls reuse the container; `await using` auto-disposes |
-| `createWorktree()`                  | ✅ shipped | Long-lived worktree as an independent lifecycle; `wt.run()` / `wt.createSandbox()` layer on top with split-close ownership (ADR-0010); `wt.interactive()` deferred to a later release |
+| `createWorktree()`                  | ✅ shipped | Long-lived worktree as an independent lifecycle; `wt.run()` / `wt.createSandbox()` / `wt.interactive()` layer on top with split-close ownership (ADR-0010) |
+| `interactive()`                     | ✅ shipped | Launches the agent's TUI inside a sandbox or directly on the host; accepts `bind-mount`, `isolated`, or `no-sandbox` providers; uses the provider's default branch strategy |
+| `noSandbox()` sandbox provider      | ✅ shipped | Runs the agent on the host with no container; accepted only by `interactive()` / `wt.interactive()`; the agent's normal permission prompts stay active |
 
 ## Quick start
 
@@ -299,6 +301,58 @@ claudeCode("claude-opus-4-7", {
 ```
 
 `captureSessions` controls whether each iteration's **agent session** JSONL is captured from the sandbox to the host (`~/.claude/projects/<encoded-cwd>/sessions/<id>.jsonl`, with `cwd` rewritten so `claude --resume` works natively). Capture is best-effort — failure logs a warning and the run still resolves successfully. The `effort` option shown in the brief doesn't exist yet.
+
+### `interactive(options)` and `wt.interactive(options)`
+
+`interactive()` launches the **agent**'s interactive UI (e.g. Claude Code's TUI) and resolves when the user exits. It accepts all three sandbox provider kinds — **bind-mount**, **isolated**, and **no-sandbox** — and always uses the provider's default **branch strategy**. There is no `branchStrategy` option on top-level `interactive()`; for a non-default strategy with a TUI, route through `createWorktree() + wt.interactive()` (per [ADR-0009](docs/adr/0009-branch-strategy-per-call.md)).
+
+```typescript
+import { createWorktree, interactive, claudeCode } from "@missingstudio/sanddune";
+import { docker } from "@missingstudio/sanddune/sandboxes/docker";
+import { noSandbox } from "@missingstudio/sanddune/sandboxes/no-sandbox";
+
+// TUI inside Docker — same flow as run(), but you drive it.
+await interactive({
+  agent: claudeCode("claude-opus-4-7"),
+  sandbox: docker(),
+  prompt: "Help me refactor the prompt pipeline.",  // optional seed prompt
+});
+
+// TUI directly on the host — no container, agent's permission prompts stay on.
+await interactive({
+  agent: claudeCode("claude-opus-4-7"),
+  sandbox: noSandbox(),
+  cwd: "../other-repo",   // optional; relative paths resolve against process.cwd()
+});
+
+// TUI on a worktree branch (non-default strategy needs the wt.* path).
+await using wt = await createWorktree({
+  branchStrategy: { type: "branch", branch: "agent/explore" },
+});
+await wt.interactive({ agent: claudeCode("claude-opus-4-7") });
+// `sandbox` defaults to noSandbox() on wt.interactive(); pass docker() etc. to override.
+```
+
+| Option            | Type                            | Behavior                                                            |
+| ----------------- | ------------------------------- | ------------------------------------------------------------------- |
+| `agent`           | `AgentProvider`                 | **Required.** Must declare `buildInteractiveCommand` (claudeCode does) |
+| `sandbox`         | `InteractiveSandboxProvider`    | **Required** on `interactive()`; defaults to `noSandbox()` on `wt.interactive()` |
+| `prompt`          | `string`                        | Optional seed prompt; passed as a positional arg to the agent       |
+| `promptFile`      | `string`                        | Optional template file; `{{KEY}}` substitution + shell expressions  |
+| `promptArgs`      | `Record<string, string\|number>`  | Values for `{{KEY}}` placeholders; only valid with `promptFile`     |
+| `cwd`             | `string`                        | Host repo dir; relative paths resolve from `process.cwd()`          |
+| `env`             | `Record<string, string>`        | Call-site env override (per ADR-0012)                               |
+| `hooks`           | `SandboxHooks`                  | Same shape as `run()`; sandbox-side hooks are skipped under `noSandbox()` |
+| `signal`          | `AbortSignal`                   | Abort cancels the launch handshake; once the TUI is live, exit semantics depend on the underlying agent process |
+| `copyToWorktree`  | `string[]`                      | Copies host items into the worktree before hooks fire (rejected with branch strategy `head`) |
+
+`maxIterations`, `completionSignal`, `idleTimeoutSeconds`, and `logging` are **not** part of `InteractiveOptions` — interactive sessions are user-driven, not iteration-bounded.
+
+#### `noSandbox()` and the `--dangerously-skip-permissions` policy
+
+Under bind-mount and isolated providers, sanddune passes `--dangerously-skip-permissions` to Claude Code so the agent can act freely inside the container. Under `noSandbox()`, the agent runs directly on the host and the flag is **not** passed — Claude Code's normal permission prompts stay active. This is enforced via the agent provider's `buildInteractiveCommand({ skipPermissions })` callback; the orchestrator decides `skipPermissions` based on the sandbox kind.
+
+`noSandbox()` is accepted only by `interactive()` / `wt.interactive()`. The type system rejects it for `run()` and `createSandbox()` — AFK runs require a real sandbox.
 
 ### Custom bind-mount providers
 

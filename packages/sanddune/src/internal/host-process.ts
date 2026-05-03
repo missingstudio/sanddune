@@ -7,6 +7,65 @@ export interface ProcessResult {
   readonly exitCode: number;
 }
 
+export interface SpawnHostInteractiveOptions {
+  readonly cwd?: string;
+  readonly env?: Readonly<Record<string, string>>;
+  /** When the signal aborts, the subprocess is killed (SIGTERM) and the
+   *  promise rejects with `signal.reason` verbatim. Pre-aborted signals
+   *  reject before spawn. */
+  readonly signal?: AbortSignal;
+}
+
+export interface InteractiveProcessResult {
+  readonly exitCode: number;
+}
+
+/** Spawn a host subprocess with stdin/stdout/stderr inherited from the
+ *  parent — used to launch an **agent**'s TUI for `interactive()` /
+ *  `wt.interactive()`. Resolves when the child exits; never reads or
+ *  buffers its output (the user is talking to it directly). */
+export function spawnHostInteractive(
+  cmd: string,
+  args: readonly string[],
+  options?: SpawnHostInteractiveOptions,
+): Promise<InteractiveProcessResult> {
+  return new Promise((resolvePromise, reject) => {
+    const signal = options?.signal;
+    if (signal?.aborted) {
+      reject(signal.reason);
+      return;
+    }
+
+    const proc = spawn(cmd, args, {
+      cwd: options?.cwd,
+      ...(options?.env !== undefined && {
+        env: { ...process.env, ...options.env },
+      }),
+      stdio: "inherit",
+    });
+
+    let aborted = false;
+    const onAbort = () => {
+      aborted = true;
+      proc.kill("SIGTERM");
+    };
+    if (signal) signal.addEventListener("abort", onAbort, { once: true });
+
+    proc.on("error", (error) => {
+      if (signal) signal.removeEventListener("abort", onAbort);
+      reject(error);
+    });
+    proc.on("close", (code) => {
+      if (signal) signal.removeEventListener("abort", onAbort);
+      if (aborted) {
+        reject(signal!.reason);
+        return;
+      }
+      resolvePromise({ exitCode: code ?? 0 });
+    });
+  });
+}
+
 export interface SpawnHostOptions {
   readonly cwd?: string;
   /** When set, stdout is split on newlines and each line is delivered as it
