@@ -70,6 +70,13 @@ export type {
   SubstitutePromptArgsResult,
 } from "./prompt-argument-substitution";
 
+export { expandPrompt } from "./prompt-expansion";
+export type {
+  ExpandPromptInput,
+  ExpandPromptResult,
+  SandboxExec,
+} from "./prompt-expansion";
+
 export type {
   CompletionSignal,
   CopyToWorktree,
