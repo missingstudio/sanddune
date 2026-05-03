@@ -1,6 +1,7 @@
 import type { WorktreePlan } from "@missingstudio/sanddune-core";
 import { gitBranchDelete, gitMerge } from "./git";
 import {
+  createBranchWorktree,
   createMergeToHeadWorktree,
   type ManagedWorktree,
 } from "./worktree-manager";
@@ -10,8 +11,8 @@ export interface WorktreeStrategy {
   readonly sourceBranch: string;
   readonly targetBranch: string;
   /** Run after the iteration loop succeeds and before final commit reconciliation.
-   *  No-op for `head`; fast-forwards the temp source branch back to the target
-   *  branch for `merge-to-head`. */
+   *  No-op for `head` and `branch`; fast-forwards the temp source branch back to
+   *  the target branch for `merge-to-head`. */
   afterIteration(): Promise<void>;
   /** Tears down any worktree, lock, or temp branch this strategy created.
    *  Never throws — logs to stderr and returns `{}` on internal failure. */
@@ -39,9 +40,11 @@ export async function createWorktreeStrategy(
         targetBranch: options.plan.targetBranch,
       });
     case "branch":
-      throw new Error(
-        `run() does not yet support branchStrategy: { type: "branch" } in this release.`,
-      );
+      return createNamedBranchStrategy({
+        cwd: options.cwd,
+        branch: options.plan.sourceBranch,
+        targetBranch: options.plan.targetBranch,
+      });
   }
 }
 
@@ -57,6 +60,38 @@ function createHeadStrategy(args: {
     async afterIteration() {},
     async close() {
       return {};
+    },
+  };
+}
+
+async function createNamedBranchStrategy(args: {
+  cwd: string;
+  branch: string;
+  targetBranch: string;
+}): Promise<WorktreeStrategy> {
+  const worktree: ManagedWorktree = await createBranchWorktree({
+    cwd: args.cwd,
+    branch: args.branch,
+    targetBranch: args.targetBranch,
+  });
+
+  return {
+    worktreePath: worktree.path,
+    sourceBranch: worktree.sourceBranch,
+    targetBranch: args.targetBranch,
+    async afterIteration() {},
+    async close() {
+      try {
+        const r = await worktree.close();
+        return r.preserved && r.path ? { preservedPath: r.path } : {};
+      } catch (e) {
+        process.stderr.write(
+          `sanddune: worktree teardown failed: ${
+            e instanceof Error ? e.message : String(e)
+          }\n`,
+        );
+        return {};
+      }
     },
   };
 }
