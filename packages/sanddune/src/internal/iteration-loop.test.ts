@@ -499,6 +499,155 @@ describe("runIterationLoop", () => {
     });
   });
 
+  describe("resumeSessionId forwarding", () => {
+    test("resumeSessionId reaches invoker only on iteration 1; iteration 2+ get undefined", async () => {
+      const seen: { iteration: number; resumeSessionId: string | undefined }[] = [];
+      const invoker: AgentInvokerService = {
+        invoke: ({ iteration, resumeSessionId }) =>
+          Effect.tryPromise({
+            try: async () => {
+              seen.push({ iteration, resumeSessionId });
+              return { events: [textEvent("ok\n", iteration)] };
+            },
+            catch: (e) => (e instanceof Error ? e : new Error(String(e))),
+          }),
+      };
+      const { log } = makeFakeLogger();
+
+      await runLoop(
+        {
+          getPromptForIteration: async () => "go",
+          logger: log,
+          cwd: repo,
+          beforeSha: headSha(repo),
+          maxIterations: 3,
+          completionSignals: [],
+          idleTimeoutSeconds: NEVER_FIRES,
+          resumeSessionId: "session-XYZ",
+        },
+        invoker,
+      );
+
+      expect(seen).toEqual([
+        { iteration: 1, resumeSessionId: "session-XYZ" },
+        { iteration: 2, resumeSessionId: undefined },
+        { iteration: 3, resumeSessionId: undefined },
+      ]);
+    });
+  });
+
+  describe("captureSession integration", () => {
+    test("happy path: invoker emits sessionId → captureSession called → IterationResult.sessionId + sessionFilePath populated", async () => {
+      const captureCalls: { iteration: number; sessionId: string }[] = [];
+      const invoker: AgentInvokerService = {
+        invoke: ({ iteration }) =>
+          Effect.tryPromise({
+            try: async () => ({
+              events: [textEvent("ok\n", iteration)],
+              sessionId: `sid-${iteration}`,
+            }),
+            catch: (e) => (e instanceof Error ? e : new Error(String(e))),
+          }),
+      };
+      const { log } = makeFakeLogger();
+
+      const result = await runLoop(
+        {
+          getPromptForIteration: async () => "go",
+          logger: log,
+          cwd: repo,
+          beforeSha: headSha(repo),
+          maxIterations: 2,
+          completionSignals: [],
+          idleTimeoutSeconds: NEVER_FIRES,
+          captureSession: async ({ iteration, sessionId }) => {
+            captureCalls.push({ iteration, sessionId });
+            return `/host/sessions/${sessionId}.jsonl`;
+          },
+        },
+        invoker,
+      );
+
+      expect(captureCalls).toEqual([
+        { iteration: 1, sessionId: "sid-1" },
+        { iteration: 2, sessionId: "sid-2" },
+      ]);
+      expect(result.iterations[0]?.sessionId).toBe("sid-1");
+      expect(result.iterations[0]?.sessionFilePath).toBe(
+        "/host/sessions/sid-1.jsonl",
+      );
+      expect(result.iterations[1]?.sessionId).toBe("sid-2");
+      expect(result.iterations[1]?.sessionFilePath).toBe(
+        "/host/sessions/sid-2.jsonl",
+      );
+    });
+
+    test("capture failure (closure returns undefined) → sessionId still surfaced; sessionFilePath stays undefined; loop succeeds", async () => {
+      const invoker: AgentInvokerService = {
+        invoke: ({ iteration }) =>
+          Effect.tryPromise({
+            try: async () => ({
+              events: [textEvent("ok\n", iteration)],
+              sessionId: "sid-1",
+            }),
+            catch: (e) => (e instanceof Error ? e : new Error(String(e))),
+          }),
+      };
+      const { log } = makeFakeLogger();
+
+      const result = await runLoop(
+        {
+          getPromptForIteration: async () => "go",
+          logger: log,
+          cwd: repo,
+          beforeSha: headSha(repo),
+          maxIterations: 1,
+          completionSignals: [],
+          idleTimeoutSeconds: NEVER_FIRES,
+          captureSession: async () => undefined,
+        },
+        invoker,
+      );
+
+      expect(result.iterations).toHaveLength(1);
+      expect(result.iterations[0]?.sessionId).toBe("sid-1");
+      expect(result.iterations[0]?.sessionFilePath).toBeUndefined();
+    });
+
+    test("invoker returns no sessionId → captureSession is never called", async () => {
+      let captureInvoked = 0;
+      const invoker: AgentInvokerService = {
+        invoke: () =>
+          Effect.tryPromise({
+            try: async () => ({ events: [textEvent("ok\n", 1)] }),
+            catch: (e) => (e instanceof Error ? e : new Error(String(e))),
+          }),
+      };
+      const { log } = makeFakeLogger();
+
+      const result = await runLoop(
+        {
+          getPromptForIteration: async () => "go",
+          logger: log,
+          cwd: repo,
+          beforeSha: headSha(repo),
+          maxIterations: 1,
+          completionSignals: [],
+          idleTimeoutSeconds: NEVER_FIRES,
+          captureSession: async () => {
+            captureInvoked += 1;
+            return "/should/not/be/used";
+          },
+        },
+        invoker,
+      );
+
+      expect(captureInvoked).toBe(0);
+      expect(result.iterations[0]?.sessionId).toBeUndefined();
+      expect(result.iterations[0]?.sessionFilePath).toBeUndefined();
+    });
+  });
+
   describe("caller-supplied signal", () => {
     test("pre-aborted signal → loop rejects with reason; invoker is never called", async () => {
       const { invoker, calls } = makeScriptedInvoker([

@@ -16,11 +16,21 @@ export interface AgentInvokeInput {
    *  signal is owned inside the invoker; callers do not see the composite.
    *  A non-positive value disables the watchdog. */
   readonly idleTimeoutSeconds: number;
+  /** When set, forwarded to `agentProvider.buildCommand` so the agent can
+   *  emit its provider-specific resume args (e.g. Claude Code's
+   *  `--resume <id>`). The **iteration loop** sets this only on iteration 1
+   *  when `RunOptions.resumeSession` is configured. */
+  readonly resumeSessionId?: string;
 }
 
 export interface AgentInvokeResult {
   readonly events: readonly AgentStreamEvent[];
   readonly completionSignal?: CompletionSignal;
+  /** Captured iff the **agent provider** has a `sessionCapture` capability
+   *  AND emitted a session id during streaming (Claude Code does this via
+   *  the `system/init` line). The **iteration loop** uses this to drive the
+   *  best-effort capture step. */
+  readonly sessionId?: string;
 }
 
 export interface AgentInvokerService {

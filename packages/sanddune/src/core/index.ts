@@ -23,6 +23,7 @@ export type {
 export type {
   AgentBuildCommandInput,
   AgentProvider,
+  AgentSessionCapture,
   AgentStreamEvent,
 } from "./agent-provider";
 

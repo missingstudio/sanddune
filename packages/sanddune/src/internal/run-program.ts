@@ -19,6 +19,11 @@ import {
 import { runIterationLoop } from "./iteration-loop";
 import { runEffect } from "./run-effect";
 import { openRunSession, type RunSession } from "./run-session";
+import {
+  makeCaptureSessionFn,
+  transferSessionToSandbox,
+  validateResumeSession,
+} from "./session-capture";
 import { createWorktreeStrategy } from "./worktree-strategy";
 
 /** Set to 1 so existing single-iteration callers don't get a cost multiplier
@@ -45,6 +50,22 @@ export async function runProgram(
 
   const provider = options.sandbox;
   const cwd = resolvePath(options.cwd ?? process.cwd());
+  const maxIterations = options.maxIterations ?? DEFAULT_MAX_ITERATIONS;
+
+  // Validates RESUME options on the **host** before any sandbox/worktree
+  // side effects: bad combos (resume + maxIterations > 1) and a missing
+  // host session file should fail fast, not after a stray container has
+  // already been spun up. Non-Claude agents have no `sessionCapture` and
+  // are silently ignored here.
+  if (options.resumeSession !== undefined) {
+    await validateResumeSession({
+      resumeSession: options.resumeSession,
+      agent: options.agent,
+      hostCwd: cwd,
+      maxIterations,
+    });
+  }
+
   const env = await resolveEnv({
     processEnv: process.env,
     sandduneEnvPath: join(cwd, ".sanddune", ".env"),
@@ -118,6 +139,23 @@ export async function runProgram(
       env,
     });
 
+    // Resume must happen after the sandbox exists (we write into it via
+    // `exec`) but before any iteration runs (so iteration 1's `--resume`
+    // points at a session file that already lives at the in-sandbox path
+    // Claude Code expects). Non-Claude agents lack `sessionCapture` and
+    // are skipped — the option was already validated above.
+    if (
+      options.resumeSession !== undefined &&
+      options.agent.sessionCapture !== undefined
+    ) {
+      await transferSessionToSandbox({
+        handle,
+        capture: options.agent.sessionCapture,
+        hostCwd: cwd,
+        sessionId: options.resumeSession,
+      });
+    }
+
     await runOnSandboxReadyParallel({
       hostHooks: options.hooks?.host?.onSandboxReady,
       sandboxHooks: options.hooks?.sandbox?.onSandboxReady,
@@ -136,6 +174,12 @@ export async function runProgram(
         }),
       );
 
+    const captureSession = makeCaptureSessionFn({
+      handle,
+      agent: options.agent,
+      hostCwd: cwd,
+    });
+
     const loopResult = await runEffect(
       runIterationLoop({
         getPromptForIteration: () =>
@@ -143,11 +187,16 @@ export async function runProgram(
         logger: session.logger,
         cwd: strategy.worktreePath,
         beforeSha,
-        maxIterations: options.maxIterations ?? DEFAULT_MAX_ITERATIONS,
+        maxIterations,
         completionSignals: normalizeCompletionSignals(options.completionSignal),
         idleTimeoutSeconds:
           options.idleTimeoutSeconds ?? DEFAULT_IDLE_TIMEOUT_SECONDS,
         ...(options.signal !== undefined && { signal: options.signal }),
+        ...(options.resumeSession !== undefined &&
+          options.agent.sessionCapture !== undefined && {
+            resumeSessionId: options.resumeSession,
+          }),
+        ...(captureSession !== undefined && { captureSession }),
       }).pipe(Effect.provide(agentInvokerLayer)),
     );
 

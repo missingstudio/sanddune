@@ -20,6 +20,14 @@ export interface IterationUsage {
 export interface IterationResult {
   readonly iteration: number;
   readonly commitSha?: string;
+  /** **Agent session** id, populated when the agent provider has a
+   *  `sessionCapture` capability and emitted an id during the iteration.
+   *  `undefined` for non-Claude providers and when `captureSessions: false`. */
+  readonly sessionId?: string;
+  /** Absolute host path to the captured **agent session** JSONL. Populated
+   *  only when capture succeeds; capture failure logs a warning and leaves
+   *  this `undefined` (run still resolves successfully — see CONTEXT.md
+   *  "agent session capture is best-effort"). */
   readonly sessionFilePath?: string;
   readonly usage?: IterationUsage;
   readonly completionSignal?: CompletionSignal;
