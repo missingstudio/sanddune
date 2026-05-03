@@ -77,6 +77,7 @@ function runInvoke(
     iteration?: number;
     idleTimeoutSeconds: number;
     signal?: AbortSignal;
+    resumeSessionId?: string;
   },
 ) {
   return runEffect(
@@ -85,6 +86,9 @@ function runInvoke(
       iteration: input.iteration ?? 1,
       idleTimeoutSeconds: input.idleTimeoutSeconds,
       ...(input.signal !== undefined && { signal: input.signal }),
+      ...(input.resumeSessionId !== undefined && {
+        resumeSessionId: input.resumeSessionId,
+      }),
     }),
   );
 }
@@ -233,6 +237,74 @@ describe("makeProductionAgentInvoker — caller signal composition (ADR-0011)", 
       }),
     ).rejects.toBe(reason);
     expect(observed).toEqual([]);
+  });
+});
+
+describe("makeProductionAgentInvoker — session capture", () => {
+  test("forwards resumeSessionId to buildCommand", async () => {
+    const seen: { resumeSessionId: string | undefined }[] = [];
+    const provider: AgentProvider = {
+      name: "fake",
+      buildCommand: ({ resumeSessionId }) => {
+        seen.push({ resumeSessionId });
+        return "x";
+      },
+      parseLine: () => [],
+    };
+    const handle = makeFakeHandle([{ line: "ignored", afterMs: 1 }]);
+    const invoker = makeProductionAgentInvoker({
+      agentProvider: provider,
+      handle,
+      onEvent: () => {},
+    });
+
+    await runInvoke(invoker, { idleTimeoutSeconds: 60 });
+    await runInvoke(invoker, {
+      idleTimeoutSeconds: 60,
+      resumeSessionId: "session-XYZ",
+    });
+
+    expect(seen[0]?.resumeSessionId).toBeUndefined();
+    expect(seen[1]?.resumeSessionId).toBe("session-XYZ");
+  });
+
+  test("extracts sessionId from the first matching line; result.sessionId is set", async () => {
+    const provider: AgentProvider = {
+      name: "fake",
+      sessionCapture: {
+        parseSessionId: (line) =>
+          line.startsWith("INIT:") ? line.slice(5) : undefined,
+        hostSessionPath: () => "/host/x.jsonl",
+        sandboxSessionPath: () => "/sb/x.jsonl",
+        rewriteCwd: (s) => s,
+      },
+      buildCommand: () => "x",
+      parseLine: () => [],
+    };
+    const handle = makeFakeHandle([
+      { line: "noise", afterMs: 1 },
+      { line: "INIT:abc-123", afterMs: 1 },
+      { line: "INIT:should-not-overwrite", afterMs: 1 },
+    ]);
+    const invoker = makeProductionAgentInvoker({
+      agentProvider: provider,
+      handle,
+      onEvent: () => {},
+    });
+
+    const result = await runInvoke(invoker, { idleTimeoutSeconds: 60 });
+    expect(result.sessionId).toBe("abc-123");
+  });
+
+  test("agent without sessionCapture → result.sessionId stays undefined", async () => {
+    const handle = makeFakeHandle([{ line: "INIT:should-be-ignored", afterMs: 1 }]);
+    const invoker = makeProductionAgentInvoker({
+      agentProvider: makeFakeAgent(),
+      handle,
+      onEvent: () => {},
+    });
+    const result = await runInvoke(invoker, { idleTimeoutSeconds: 60 });
+    expect(result.sessionId).toBeUndefined();
   });
 });
 

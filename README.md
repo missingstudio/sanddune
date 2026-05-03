@@ -86,7 +86,7 @@ A run goes through three phases:
 2. **Agent invocation** — invoke the agent with the (inline) prompt, stream JSON events into the run log, capture stdout text events.
 3. **Teardown** — read commits off the worktree HEAD, fast-forward back to the host branch (`merge-to-head` only), tear down the container, and clean up the worktree (preserving it on disk if dirty).
 
-The iteration loop honors `maxIterations` (default `1`), `completionSignal` (default `<promise>COMPLETE</promise>`, substring-matched against the agent's text events; first match across iterations wins), `idleTimeoutSeconds` (default `600`; resets on every agent stream event — on expiry the agent subprocess is killed and the run rejects with `AgentIdleTimeoutError`), and `signal` (caller-supplied `AbortSignal` — when it fires mid-iteration, the agent subprocess is killed and `run()` rejects with `signal.reason` verbatim; the worktree is left as-is per ADR-0011). For **prompt templates**, **prompt expansion** evaluates `` !`shell expressions` `` once per iteration before the agent is invoked. **Agent session** capture is not yet wired.
+The iteration loop honors `maxIterations` (default `1`), `completionSignal` (default `<promise>COMPLETE</promise>`, substring-matched against the agent's text events; first match across iterations wins), `idleTimeoutSeconds` (default `600`; resets on every agent stream event — on expiry the agent subprocess is killed and the run rejects with `AgentIdleTimeoutError`), and `signal` (caller-supplied `AbortSignal` — when it fires mid-iteration, the agent subprocess is killed and `run()` rejects with `signal.reason` verbatim; the worktree is left as-is per ADR-0011). For **prompt templates**, **prompt expansion** evaluates `` !`shell expressions` `` once per iteration before the agent is invoked. With `claudeCode()` (default `captureSessions: true`), each iteration's session JSONL is captured from the sandbox to `~/.claude/projects/<encoded-cwd>/sessions/<id>.jsonl` on the host with `cwd` fields rewritten so `claude --resume` works natively; capture is best-effort (failure logs a warning and the run still resolves successfully).
 
 ## Branch strategies
 
@@ -184,9 +184,11 @@ await run({
 });
 ```
 
+`resumeSession: "<id>"` continues a prior Claude Code session in a fresh sandbox. Validated **before** sandbox creation: the host session file must exist (at the path written by a previous capture), and the option is rejected when combined with `maxIterations > 1`. The file is transferred into the sandbox with `cwd` rewritten, and `--resume <id>` is passed to Claude Code on iteration 1 only — subsequent iterations start fresh. Non-Claude agent providers ignore `resumeSession`.
+
 #### Accepted by the type but not yet wired
 
-`timeouts.idleSeconds`, `timeouts.totalSeconds`, `logging`, `resumeSession`. Silently ignored. Don't depend on them.
+`timeouts.idleSeconds`, `timeouts.totalSeconds`, `logging`. Silently ignored. Don't depend on them.
 
 ### `RunResult`
 
@@ -204,7 +206,8 @@ interface RunResult {
 interface IterationResult {
   iteration: number;
   commitSha?: string;              // last commit produced on this iteration, if any
-  sessionFilePath?: string;        // not set today (capture not implemented)
+  sessionId?: string;              // agent session id (Claude Code system/init), when sessionCapture is configured
+  sessionFilePath?: string;        // host path to captured JSONL, when capture succeeded
   usage?: IterationUsage;          // not set today
   completionSignal?: string;       // set on the iteration that matched the completion signal
 }
@@ -258,10 +261,11 @@ The container is started with `-w /workspace` and the worktree bind-mounted ther
 ```typescript
 claudeCode("claude-opus-4-7", {
   env: { ANTHROPIC_API_KEY: "sk-ant-..." },   // optional; merged per ADR-0012
+  captureSessions: true,                       // optional; default true. Set false to skip session capture
 })
 ```
 
-Today's `ClaudeCodeOptions` is `{ env? }`. The `effort` and `captureSessions` options shown in the brief don't exist yet.
+`captureSessions` controls whether each iteration's **agent session** JSONL is captured from the sandbox to the host (`~/.claude/projects/<encoded-cwd>/sessions/<id>.jsonl`, with `cwd` rewritten so `claude --resume` works natively). Capture is best-effort — failure logs a warning and the run still resolves successfully. The `effort` option shown in the brief doesn't exist yet.
 
 ### Custom bind-mount providers
 

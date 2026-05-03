@@ -29,6 +29,20 @@ export interface IterationLoopInput {
    *  `spawnHost` SIGTERM) and rejects with `signal.reason` verbatim
    *  (ADR-0004 / ADR-0011). */
   readonly signal?: AbortSignal;
+  /** **Agent session** id to resume. Forwarded to the **agent invoker** on
+   *  iteration 1 only; subsequent iterations always start fresh per the
+   *  brief (slice #14 — long-lived sandboxes don't chain Claude session
+   *  state through `--resume`). */
+  readonly resumeSessionId?: string;
+  /** Best-effort capture closure invoked after each iteration whose invoke
+   *  returned a `sessionId`. Returns the absolute host path on success,
+   *  `undefined` if capture failed (the closure handles its own logging).
+   *  Omitted when the agent provider has no `sessionCapture` capability or
+   *  capture is disabled — in that case the loop never asks. */
+  readonly captureSession?: (input: {
+    readonly iteration: number;
+    readonly sessionId: string;
+  }) => Promise<string | undefined>;
 }
 
 export interface IterationLoopResult {
@@ -61,11 +75,14 @@ export const runIterationLoop = (
 
       yield* fromPromise(() => input.logger.iterationStarted(iteration));
 
+      const resumeSessionId =
+        iteration === 1 ? input.resumeSessionId : undefined;
       const result = yield* invoker.invoke({
         prompt: promptForIteration,
         iteration,
         idleTimeoutSeconds: input.idleTimeoutSeconds,
         ...(input.signal !== undefined && { signal: input.signal }),
+        ...(resumeSessionId !== undefined && { resumeSessionId }),
       });
 
       let signalMatched: string | undefined;
@@ -91,6 +108,19 @@ export const runIterationLoop = (
       const lastCommit = newCommits.at(-1) ?? null;
       if (lastCommit !== null) lastSha = lastCommit;
 
+      let sessionFilePath: string | undefined;
+      if (
+        input.captureSession !== undefined &&
+        result.sessionId !== undefined
+      ) {
+        sessionFilePath = yield* fromPromise(() =>
+          input.captureSession!({
+            iteration,
+            sessionId: result.sessionId!,
+          }),
+        );
+      }
+
       yield* fromPromise(() =>
         input.logger.iterationEnded(iteration, lastCommit),
       );
@@ -98,6 +128,8 @@ export const runIterationLoop = (
       iterations.push({
         iteration,
         ...(lastCommit !== null && { commitSha: lastCommit }),
+        ...(result.sessionId !== undefined && { sessionId: result.sessionId }),
+        ...(sessionFilePath !== undefined && { sessionFilePath }),
         ...(signalMatched !== undefined && { completionSignal: signalMatched }),
       });
 

@@ -13,14 +13,17 @@ export function makeProductionAgentInvoker(params: {
   readonly onEvent: (event: AgentStreamEvent) => void;
 }): AgentInvokerService {
   return {
-    invoke: ({ prompt, iteration, signal, idleTimeoutSeconds }) =>
+    invoke: ({ prompt, iteration, signal, idleTimeoutSeconds, resumeSessionId }) =>
       Effect.tryPromise({
         try: async () => {
           const command = params.agentProvider.buildCommand({
             prompt,
             iteration,
+            ...(resumeSessionId !== undefined && { resumeSessionId }),
           });
           const events: AgentStreamEvent[] = [];
+          const sessionCapture = params.agentProvider.sessionCapture;
+          let sessionId: string | undefined;
 
           const idle = startIdleTimer({ idleTimeoutSeconds, iteration });
           const composite = composeSignals(signal, idle.signal);
@@ -29,6 +32,10 @@ export function makeProductionAgentInvoker(params: {
             const result = await params.handle.exec(command, {
               signal: composite,
               onLine: (line) => {
+                if (sessionCapture !== undefined && sessionId === undefined) {
+                  const id = sessionCapture.parseSessionId(line);
+                  if (id !== undefined) sessionId = id;
+                }
                 const parsed = params.agentProvider.parseLine(line, iteration);
                 if (parsed.length > 0) idle.reset();
                 for (const event of parsed) {
@@ -42,7 +49,10 @@ export function makeProductionAgentInvoker(params: {
                 `Agent exited with code ${result.exitCode}: ${result.stderr.trim()}`,
               );
             }
-            return { events };
+            return {
+              events,
+              ...(sessionId !== undefined && { sessionId }),
+            };
           } finally {
             idle.dispose();
           }

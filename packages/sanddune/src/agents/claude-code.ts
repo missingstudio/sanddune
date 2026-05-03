@@ -1,17 +1,29 @@
-import type { AgentProvider, AgentStreamEvent } from "../core";
+import { homedir } from "node:os";
+import type {
+  AgentProvider,
+  AgentSessionCapture,
+  AgentStreamEvent,
+} from "../core";
 
 export interface ClaudeCodeOptions {
   readonly env?: Readonly<Record<string, string>>;
+  /** Capture each iteration's **agent session** JSONL from the **sandbox**
+   *  to the **host** (default `true`). Set `false` to opt out — capture
+   *  becomes a no-op and `IterationResult.sessionId` /
+   *  `IterationResult.sessionFilePath` stay `undefined`. */
+  readonly captureSessions?: boolean;
 }
 
 export function claudeCode(
   model: string,
   options?: ClaudeCodeOptions,
 ): AgentProvider {
+  const captureSessions = options?.captureSessions ?? true;
   return {
     name: "claude-code",
     env: options?.env,
-    buildCommand: ({ prompt }) => {
+    ...(captureSessions && { sessionCapture: claudeCodeSessionCapture }),
+    buildCommand: ({ prompt, resumeSessionId }) => {
       const args = [
         "claude",
         "--print",
@@ -21,8 +33,11 @@ export function claudeCode(
         "--model",
         shellQuote(model),
         "--dangerously-skip-permissions",
-        shellQuote(prompt),
       ];
+      if (resumeSessionId !== undefined) {
+        args.push("--resume", shellQuote(resumeSessionId));
+      }
+      args.push(shellQuote(prompt));
       return args.join(" ");
     },
     parseLine: (line, iteration) => parseClaudeCodeLine(line, iteration),
@@ -78,6 +93,59 @@ function parseClaudeCodeLine(
   }
   return events;
 }
+
+/** Claude Code's on-disk path encoding: take the absolute path, replace every
+ *  `/` with `-`. So `/Users/me/repo` becomes `-Users-me-repo`. Matches the
+ *  layout under `~/.claude/projects/` that `claude --resume` reads from. */
+function encodeProjectDir(absPath: string): string {
+  return absPath.replace(/\//g, "-");
+}
+
+const claudeCodeSessionCapture: AgentSessionCapture = {
+  parseSessionId(line) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0) return undefined;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch {
+      return undefined;
+    }
+    if (!isRecord(parsed)) return undefined;
+    if (parsed.type !== "system" || parsed["subtype"] !== "init") {
+      return undefined;
+    }
+    const id = parsed["session_id"];
+    return typeof id === "string" && id.length > 0 ? id : undefined;
+  },
+  hostSessionPath(hostCwd, sessionId) {
+    return `${homedir()}/.claude/projects/${encodeProjectDir(
+      hostCwd,
+    )}/sessions/${sessionId}.jsonl`;
+  },
+  sandboxSessionPath(sandboxCwd, sessionId) {
+    return `~/.claude/projects/${encodeProjectDir(sandboxCwd)}/${sessionId}.jsonl`;
+  },
+  rewriteCwd(jsonl, fromCwd, toCwd) {
+    const lines = jsonl.split("\n");
+    return lines
+      .map((line, idx) => {
+        // Preserve a final trailing newline (split produces an empty tail).
+        if (line.length === 0 && idx === lines.length - 1) return line;
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(line);
+        } catch {
+          // Best-effort: leave malformed lines untouched.
+          return line;
+        }
+        if (!isRecord(parsed)) return line;
+        if (parsed["cwd"] !== fromCwd) return line;
+        return JSON.stringify({ ...parsed, cwd: toCwd });
+      })
+      .join("\n");
+  },
+};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
