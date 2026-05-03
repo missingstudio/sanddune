@@ -1,9 +1,5 @@
 <div align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://res.cloudinary.com/total-typescript/image/upload/v1775033787/readme-sandcastle-ondark_2x.png">
-    <source media="(prefers-color-scheme: light)" srcset="https://res.cloudinary.com/total-typescript/image/upload/v1775033787/readme-sandcastle-onlight_2x.png">
-    <img alt="sandcastle" src="https://res.cloudinary.com/total-typescript/image/upload/v1775033787/readme-sandcastle-onlight_2x.png" height="200" style="margin-bottom: 20px;">
-  </picture>
+  <img alt="sanddune" src="./images/sanddune.png" height="200" style="margin-bottom: 20px;">
 </div>
 
 ## What Is sanddune?
@@ -15,6 +11,8 @@ A TypeScript library for orchestrating AI coding agents in isolated sandboxes:
 3. The commits made on the branches get merged back.
 
 sanddune is provider-agnostic — it ships with built-in providers for Docker, Podman, and Vercel, and you can create your own. Great for parallelizing multiple AFK agents, creating review pipelines, or even just orchestrating your own agents.
+
+> **Note:** sanddune is heavily inspired by [Matt Pocock's sandcastle](https://github.com/mattpocock/sandcastle). The core orchestration model — branch strategies, bind-mount vs. isolated providers, and the `run()` API shape — is based on his work. We've extended it with our own provider implementations, env model, and tooling. Huge thanks to Matt for the original design.
 
 ## Prerequisites
 
@@ -39,7 +37,7 @@ npm install --save-dev @missingstudio/sanddune
 npx sanddune init
 ```
 
-3. Edit `.sanddune/.env` and fill in your default values for `ANTHROPIC_API_KEY`. If you want to use your Claude subscription instead of an API key, see [#191](https://github.com/mattpocock/sanddune/issues/191).
+3. Edit `.sanddune/.env` and fill in your default values for `ANTHROPIC_API_KEY`. If you want to use your Claude subscription instead of an API key, see [sandcastle#191](https://github.com/mattpocock/sandcastle/issues/191).
 
 ```bash
 cp .sanddune/.env.example .sanddune/.env
@@ -1164,6 +1162,10 @@ bun run build      # Build with bun build (per package, orchestrated by turbo)
 bun test           # Run tests with bun test
 bun run typecheck  # Type-check with tsgo
 ```
+
+## Acknowledgments
+
+sanddune is heavily inspired by [**sandcastle**](https://github.com/mattpocock/sandcastle) by [Matt Pocock](https://github.com/mattpocock). If you're evaluating agent orchestration libraries, go check out the original.
 
 ## License
 
