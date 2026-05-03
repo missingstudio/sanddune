@@ -14,8 +14,7 @@ const result = await run({
 
 console.log("\nrun complete");
 
-console.log(`  source branch: ${result.sourceBranch}`);
-console.log(`  target branch: ${result.targetBranch}`);
+console.log(`  branch:        ${result.branch}`);
 console.log(`  iterations:    ${result.iterations.length}`);
 console.log(`  commits:       ${result.commits.length}`);
 

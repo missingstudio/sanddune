@@ -691,7 +691,8 @@ Removes the Podman image.
 | `completionSignal` | string?             | The matched completion signal string, or `undefined` if none fired |
 | `stdout`           | string              | Agent output                                                       |
 | `commits`          | `{ sha }[]`         | Commits created during the run                                     |
-| `branch`           | string              | Target branch name                                                 |
+| `branch`           | string              | Branch where the run's commits live after completion. For `head` and `merge-to-head`, the host branch at `run()` time. For the `branch` strategy, the named branch supplied by the caller |
+| `worktreePath`     | string?             | Set when the worktree was preserved on disk after the run (e.g. dirty `merge-to-head`). Caller can `cd` here to recover leftover work |
 | `logFilePath`      | string?             | Path to the log file (only when logging to a file)                 |
 
 ### `IterationResult`
