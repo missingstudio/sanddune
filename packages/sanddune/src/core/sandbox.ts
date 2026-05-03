@@ -26,6 +26,7 @@ export interface CreateSandboxOptions<
 export type SandboxRunOptions = PromptOption & {
   readonly maxIterations?: number;
   readonly completionSignal?: string | readonly string[];
+  readonly idleTimeoutSeconds?: number;
   readonly env?: Readonly<Record<string, string>>;
   readonly logging?: LoggingOption;
   readonly signal?: AbortSignal;

@@ -10,6 +10,9 @@ export interface ExecOptions {
   readonly cwd?: string;
   readonly sudo?: boolean;
   readonly onLine?: (line: string) => void;
+  /** When the signal aborts, the underlying subprocess is killed (SIGTERM)
+   *  and the returned promise rejects with `signal.reason` verbatim. */
+  readonly signal?: AbortSignal;
 }
 
 export type SandboxKind = "bind-mount" | "isolated" | "no-sandbox";

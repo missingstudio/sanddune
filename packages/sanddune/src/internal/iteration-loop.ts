@@ -1,5 +1,6 @@
 import { Effect } from "effect";
 import {
+  AgentIdleTimeoutError,
   AgentInvoker,
   expandPrompt,
   type IterationResult,
@@ -21,6 +22,10 @@ export interface IterationLoopInput {
   readonly maxIterations: number;
   /** First match across iterations wins; empty array disables detection. */
   readonly completionSignals: readonly string[];
+  /** Per-iteration idle timeout. Resets on every **agent stream event**;
+   *  on expiry the loop synthesizes an abort with `AgentIdleTimeoutError`
+   *  as the reason and the iteration's call to the agent rejects. */
+  readonly idleTimeoutSeconds: number;
   readonly sandboxExec: SandboxExec;
   /** Checked between iterations; mid-iteration kill of the agent subprocess
    *  needs `signal` threaded into `spawnHost` and is a follow-up. */
@@ -58,10 +63,18 @@ export const runIterationLoop = (
 
       yield* fromPromise(() => input.runLog.iterationStarted(iteration));
 
-      const result = yield* invoker.invoke({
-        prompt: promptForIteration,
+      const idle = startIdleTimer({
+        idleTimeoutSeconds: input.idleTimeoutSeconds,
         iteration,
       });
+      const result = yield* invoker
+        .invoke({
+          prompt: promptForIteration,
+          iteration,
+          signal: idle.signal,
+          onEvent: () => idle.reset(),
+        })
+        .pipe(Effect.ensuring(Effect.sync(() => idle.dispose())));
 
       let signalMatched: string | undefined;
       for (const event of result.events) {
@@ -121,4 +134,50 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
   const reason = signal.reason;
   if (reason instanceof Error) throw reason;
   throw new Error(typeof reason === "string" ? reason : "aborted");
+}
+
+interface IdleTimer {
+  readonly signal: AbortSignal;
+  reset(): void;
+  dispose(): void;
+}
+
+function startIdleTimer(params: {
+  readonly idleTimeoutSeconds: number;
+  readonly iteration: number;
+}): IdleTimer {
+  const controller = new AbortController();
+  const ms = params.idleTimeoutSeconds * 1000;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let disposed = false;
+
+  const arm = () => {
+    if (disposed) return;
+    timer = setTimeout(() => {
+      controller.abort(
+        new AgentIdleTimeoutError({
+          idleTimeoutSeconds: params.idleTimeoutSeconds,
+          iteration: params.iteration,
+        }),
+      );
+    }, ms);
+  };
+
+  arm();
+
+  return {
+    signal: controller.signal,
+    reset: () => {
+      if (disposed) return;
+      if (timer !== undefined) clearTimeout(timer);
+      arm();
+    },
+    dispose: () => {
+      disposed = true;
+      if (timer !== undefined) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
+    },
+  };
 }

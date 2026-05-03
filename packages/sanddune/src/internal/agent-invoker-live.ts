@@ -12,7 +12,7 @@ export function makeProductionAgentInvoker(params: {
   readonly onEvent: (event: AgentStreamEvent) => void;
 }): AgentInvokerService {
   return {
-    invoke: ({ prompt, iteration }) =>
+    invoke: ({ prompt, iteration, signal, onEvent }) =>
       Effect.tryPromise({
         try: async () => {
           const command = params.agentProvider.buildCommand({
@@ -21,11 +21,13 @@ export function makeProductionAgentInvoker(params: {
           });
           const events: AgentStreamEvent[] = [];
           const result = await params.handle.exec(command, {
+            signal,
             onLine: (line) => {
               const parsed = params.agentProvider.parseLine(line, iteration);
               for (const event of parsed) {
                 events.push(event);
                 params.onEvent(event);
+                onEvent?.(event);
               }
             },
           });

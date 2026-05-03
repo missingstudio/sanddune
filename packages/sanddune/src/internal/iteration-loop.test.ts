@@ -16,6 +16,7 @@ import {
   type IterationLoopInput,
   type IterationLoopResult,
 } from "./iteration-loop";
+import { runEffect } from "./run-effect";
 import type { RunLog } from "./run-log";
 
 function runSync(cmd: string, args: readonly string[], cwd: string) {
@@ -133,11 +134,81 @@ const EXEC_NEVER: SandboxExec = () => {
   throw new Error("sandboxExec must not be called");
 };
 
+/** A timeout long enough that the loop must reach its natural end before the
+ *  idle timer fires. Existing tests don't exercise the idle path. */
+const NEVER_FIRES = 60;
+
+interface StreamScript {
+  /** Each entry: wait `afterMs`, then deliver `event` via `onEvent`. After
+   *  the last entry, `invoke()` resolves with the full event array. If the
+   *  iteration loop aborts the signal while waiting, `invoke()` rejects
+   *  with `signal.reason` instead. */
+  readonly events: readonly { readonly event: AgentStreamEvent; readonly afterMs: number }[];
+}
+
+interface StreamingInvoker {
+  readonly invoker: AgentInvokerService;
+  readonly observed: AgentStreamEvent[];
+}
+
+/** Streaming variant of `makeScriptedInvoker`: delivers events one-by-one
+ *  through `onEvent` with controllable inter-event silence, and honors the
+ *  inbound `signal` by rejecting verbatim. Use to exercise the idle timer. */
+function makeStreamingInvoker(
+  scripts: readonly StreamScript[],
+): StreamingInvoker {
+  const observed: AgentStreamEvent[] = [];
+  const invoker: AgentInvokerService = {
+    invoke: ({ iteration, signal, onEvent }) =>
+      Effect.tryPromise({
+        try: async () => {
+          const script = scripts[iteration - 1];
+          if (!script) {
+            throw new Error(
+              `streaming invoker: no script for iteration ${iteration}`,
+            );
+          }
+          const delivered: AgentStreamEvent[] = [];
+          for (const step of script.events) {
+            await waitOrAbort(step.afterMs, signal);
+            delivered.push(step.event);
+            observed.push(step.event);
+            onEvent?.(step.event);
+          }
+          return { events: delivered };
+        },
+        catch: (e) => (e instanceof Error ? e : new Error(String(e))),
+      }),
+  };
+  return { invoker, observed };
+}
+
+/** Resolve after `ms` unless `signal` aborts first, in which case reject
+ *  with `signal.reason` verbatim — matching the kill-and-reject semantics
+ *  the live invoker gets through `spawnHost`. */
+function waitOrAbort(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason);
+      return;
+    }
+    const timer = setTimeout(() => {
+      if (signal) signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal!.reason);
+    };
+    if (signal) signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 async function runLoop(
   input: IterationLoopInput,
   invoker: AgentInvokerService,
 ): Promise<IterationLoopResult> {
-  return Effect.runPromise(
+  return runEffect(
     runIterationLoop(input).pipe(
       Effect.provide(Layer.succeed(AgentInvoker, invoker)),
     ),
@@ -174,6 +245,7 @@ describe("runIterationLoop", () => {
           beforeSha: headSha(repo),
           maxIterations: 3,
           completionSignals: [SIGNAL],
+          idleTimeoutSeconds: NEVER_FIRES,
           sandboxExec: EXEC_NEVER,
         },
         invoker,
@@ -205,6 +277,7 @@ describe("runIterationLoop", () => {
           beforeSha: headSha(repo),
           maxIterations: 5,
           completionSignals: [SIGNAL],
+          idleTimeoutSeconds: NEVER_FIRES,
           sandboxExec: EXEC_NEVER,
         },
         invoker,
@@ -240,6 +313,7 @@ describe("runIterationLoop", () => {
           beforeSha: headSha(repo),
           maxIterations: 1,
           completionSignals: [FIRST_IN_ARRAY, SECOND_IN_ARRAY],
+          idleTimeoutSeconds: NEVER_FIRES,
           sandboxExec: EXEC_NEVER,
         },
         invoker,
@@ -265,6 +339,7 @@ describe("runIterationLoop", () => {
           beforeSha: headSha(repo),
           maxIterations: 2,
           completionSignals: [],
+          idleTimeoutSeconds: NEVER_FIRES,
           sandboxExec: EXEC_NEVER,
         },
         invoker,
@@ -294,6 +369,7 @@ describe("runIterationLoop", () => {
           beforeSha: headSha(repo),
           maxIterations: 2,
           completionSignals: [],
+          idleTimeoutSeconds: NEVER_FIRES,
           sandboxExec: EXEC_NEVER,
         },
         invoker,
@@ -330,6 +406,7 @@ describe("runIterationLoop", () => {
           beforeSha: headSha(repo),
           maxIterations: 3,
           completionSignals: [],
+          idleTimeoutSeconds: NEVER_FIRES,
           sandboxExec: exec,
         },
         invoker,
@@ -381,6 +458,7 @@ describe("runIterationLoop", () => {
           beforeSha,
           maxIterations: 3,
           completionSignals: [],
+          idleTimeoutSeconds: NEVER_FIRES,
           sandboxExec: EXEC_NEVER,
         },
         invoker,
@@ -395,6 +473,124 @@ describe("runIterationLoop", () => {
       expect(result.commits).toHaveLength(3);
       expect(result.commits[0]).toBe(iter1Sha.current);
       expect(result.commits[2]).toBe(iter3SecondSha.current);
+    });
+  });
+
+  describe("idle timeout", () => {
+    test("silent stream → fires after idleTimeoutSeconds, rejects with AgentIdleTimeoutError", async () => {
+      // Schedules one event 5s out, but the timeout fires at 100ms.
+      const { invoker } = makeStreamingInvoker([
+        { events: [{ event: textEvent("never seen", 1), afterMs: 5_000 }] },
+      ]);
+      const { log } = makeFakeRunLog();
+
+      const start = Date.now();
+      const promise = runLoop(
+        {
+          prompt: "go",
+          promptKind: "inline",
+          runLog: log,
+          cwd: repo,
+          beforeSha: headSha(repo),
+          maxIterations: 1,
+          completionSignals: [],
+          idleTimeoutSeconds: 0.1,
+          sandboxExec: EXEC_NEVER,
+        },
+        invoker,
+      );
+
+      await expect(promise).rejects.toMatchObject({
+        name: "AgentIdleTimeoutError",
+        idleTimeoutSeconds: 0.1,
+        iteration: 1,
+      });
+      const elapsed = Date.now() - start;
+      // Timer is 100ms; allow generous upper bound for CI jitter, lower
+      // bound proves we waited at all.
+      expect(elapsed).toBeGreaterThanOrEqual(90);
+      expect(elapsed).toBeLessThan(2_000);
+    });
+
+    test("active stream → never fires; loop completes normally", async () => {
+      // Six events, 50ms apart, with idle timeout 200ms — each event
+      // resets the timer well before it fires.
+      const SIGNAL = "<promise>COMPLETE</promise>";
+      const { invoker, observed } = makeStreamingInvoker([
+        {
+          events: [
+            { event: textEvent("step 1\n", 1), afterMs: 50 },
+            { event: textEvent("step 2\n", 1), afterMs: 50 },
+            { event: textEvent("step 3\n", 1), afterMs: 50 },
+            { event: textEvent("step 4\n", 1), afterMs: 50 },
+            { event: textEvent("step 5\n", 1), afterMs: 50 },
+            { event: textEvent(`done ${SIGNAL}\n`, 1), afterMs: 50 },
+          ],
+        },
+      ]);
+      const { log } = makeFakeRunLog();
+
+      const result = await runLoop(
+        {
+          prompt: "go",
+          promptKind: "inline",
+          runLog: log,
+          cwd: repo,
+          beforeSha: headSha(repo),
+          maxIterations: 1,
+          completionSignals: [SIGNAL],
+          idleTimeoutSeconds: 0.2,
+          sandboxExec: EXEC_NEVER,
+        },
+        invoker,
+      );
+
+      expect(result.iterations).toHaveLength(1);
+      expect(result.completionSignal).toBe(SIGNAL);
+      expect(observed).toHaveLength(6);
+    });
+
+    test("active stream then silence → fires only after the silence period", async () => {
+      // Three quick events, then a 5s gap that the 100ms timer must catch.
+      const { invoker, observed } = makeStreamingInvoker([
+        {
+          events: [
+            { event: textEvent("burst 1\n", 1), afterMs: 30 },
+            { event: textEvent("burst 2\n", 1), afterMs: 30 },
+            { event: textEvent("burst 3\n", 1), afterMs: 30 },
+            { event: textEvent("never seen", 1), afterMs: 5_000 },
+          ],
+        },
+      ]);
+      const { log } = makeFakeRunLog();
+
+      const start = Date.now();
+      const promise = runLoop(
+        {
+          prompt: "go",
+          promptKind: "inline",
+          runLog: log,
+          cwd: repo,
+          beforeSha: headSha(repo),
+          maxIterations: 1,
+          completionSignals: [],
+          idleTimeoutSeconds: 0.1,
+          sandboxExec: EXEC_NEVER,
+        },
+        invoker,
+      );
+
+      await expect(promise).rejects.toMatchObject({
+        name: "AgentIdleTimeoutError",
+        idleTimeoutSeconds: 0.1,
+      });
+      const elapsed = Date.now() - start;
+      // Three 30ms gaps before silence (~90ms) plus the 100ms idle window
+      // ≈ 190ms; loose upper bound to absorb CI jitter.
+      expect(elapsed).toBeGreaterThanOrEqual(150);
+      expect(elapsed).toBeLessThan(2_000);
+      // The three pre-silence events were observed before the timer fired.
+      expect(observed).toHaveLength(3);
     });
   });
 });

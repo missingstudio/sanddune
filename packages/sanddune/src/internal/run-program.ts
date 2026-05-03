@@ -15,6 +15,7 @@ import { openRunLog } from "./run-log";
 import { newRunId } from "./run-id";
 import { makeProductionAgentInvoker } from "./agent-invoker-live";
 import { runIterationLoop } from "./iteration-loop";
+import { runEffect } from "./run-effect";
 import { createWorktreeStrategy } from "./worktree-strategy";
 
 /** Set to 1 so existing single-iteration callers don't get a cost multiplier
@@ -22,6 +23,8 @@ import { createWorktreeStrategy } from "./worktree-strategy";
 const DEFAULT_MAX_ITERATIONS = 1;
 /** Per CONTEXT.md. */
 const DEFAULT_COMPLETION_SIGNAL = "<promise>COMPLETE</promise>";
+/** Per ADR-0011 / brief. */
+const DEFAULT_IDLE_TIMEOUT_SECONDS = 600;
 
 export interface RunProgramTestSeams {
   readonly agentInvokerLayer?: Layer.Layer<AgentInvoker, never, never>;
@@ -109,7 +112,7 @@ export async function runProgram(
         }),
       );
 
-    const loopResult = await Effect.runPromise(
+    const loopResult = await runEffect(
       runIterationLoop({
         prompt: promptText,
         promptKind: resolvedPrompt.kind,
@@ -118,6 +121,8 @@ export async function runProgram(
         beforeSha,
         maxIterations: options.maxIterations ?? DEFAULT_MAX_ITERATIONS,
         completionSignals: normalizeCompletionSignals(options.completionSignal),
+        idleTimeoutSeconds:
+          options.idleTimeoutSeconds ?? DEFAULT_IDLE_TIMEOUT_SECONDS,
         sandboxExec: (cmd) => handle!.exec(cmd),
         signal: options.signal,
       }).pipe(Effect.provide(agentInvokerLayer)),

@@ -49,6 +49,12 @@ export type RunOptions<S extends RunSandboxProvider = RunSandboxProvider> =
     readonly branchStrategy?: AllowedBranchStrategy<S>;
     readonly maxIterations?: number;
     readonly completionSignal?: string | readonly string[];
+    /** Aborts the iteration if the **agent** produces no **agent stream
+     *  event** (text or toolCall) for this many seconds. Resets on every
+     *  event. Default `600`. Implemented as a synthesized abort — the
+     *  rejected promise carries `AgentIdleTimeoutError` as its reason
+     *  (ADR-0011). */
+    readonly idleTimeoutSeconds?: number;
     readonly hooks?: SandboxHooks;
     readonly timeouts?: Timeouts;
     readonly logging?: LoggingOption;

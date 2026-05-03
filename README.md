@@ -25,7 +25,7 @@ A TypeScript library for orchestrating AI coding agents in isolated sandboxes.
 
 | Surface                             | Status     | Notes                                                                            |
 | ----------------------------------- | ---------- | -------------------------------------------------------------------------------- |
-| `run()`                             | ✅ shipped | Bind-mount only; inline `prompt` and `promptFile`; multi-iteration via `maxIterations` + `completionSignal` |
+| `run()`                             | ✅ shipped | Bind-mount only; inline `prompt` and `promptFile`; multi-iteration via `maxIterations` + `completionSignal` + `idleTimeoutSeconds` |
 | `docker()` sandbox provider         | ✅ shipped | Bind-mount, auto image-exists check, parent `.git` re-mount for worktrees        |
 | `claudeCode()` agent provider       | ✅ shipped | `--print --output-format stream-json --verbose --dangerously-skip-permissions`   |
 | `branchStrategy: { type: "head" }`         | ✅ shipped | Default. Agent writes directly to host working tree.                             |
@@ -86,7 +86,7 @@ A run goes through three phases:
 2. **Agent invocation** — invoke the agent with the (inline) prompt, stream JSON events into the run log, capture stdout text events.
 3. **Teardown** — read commits off the worktree HEAD, fast-forward back to the host branch (`merge-to-head` only), tear down the container, and clean up the worktree (preserving it on disk if dirty).
 
-The iteration loop honors `maxIterations` (default `1`), `completionSignal` (default `<promise>COMPLETE</promise>`, substring-matched against the agent's text events; first match across iterations wins), and `signal` (checked between iterations — mid-iteration kill of the agent subprocess is a follow-up). For **prompt templates**, **prompt expansion** evaluates `` !`shell expressions` `` once per iteration before the agent is invoked. Idle/total timeouts and **agent session** capture are not yet wired.
+The iteration loop honors `maxIterations` (default `1`), `completionSignal` (default `<promise>COMPLETE</promise>`, substring-matched against the agent's text events; first match across iterations wins), `idleTimeoutSeconds` (default `600`; resets on every agent stream event — on expiry the agent subprocess is killed and the run rejects with `AgentIdleTimeoutError`), and `signal` (checked between iterations — mid-iteration kill of a caller-supplied signal is a follow-up). For **prompt templates**, **prompt expansion** evaluates `` !`shell expressions` `` once per iteration before the agent is invoked. **Agent session** capture is not yet wired.
 
 ## Branch strategies
 

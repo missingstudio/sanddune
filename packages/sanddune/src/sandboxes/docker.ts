@@ -106,7 +106,10 @@ async function dockerExec(
     args.push("-w", options.cwd);
   }
   args.push(containerId, "sh", "-c", command);
-  return spawnHost("docker", args, { onLine: options?.onLine });
+  return spawnHost("docker", args, {
+    onLine: options?.onLine,
+    signal: options?.signal,
+  });
 }
 
 async function dockerRm(containerId: string): Promise<void> {
