@@ -83,6 +83,18 @@ The script:
 - re-running the script reuses the worktree (per ADR-0003): a clean reuse logs to stdout, a dirty reuse warns to stderr; the new commit appends to the branch tip
 - prints `host HEAD before` / `host HEAD after` (should match) and the named branch's tip
 
+### Prompt template (promptFile)
+
+```bash
+bun .sanddune/docker-head-claude-code-prompt-file.ts
+```
+
+The script:
+
+- loads the prompt body from `.sanddune/prompts/hello-prompt-file.md` via the new `PromptResolver` (the relative path resolves against `process.cwd()`, so launch from the repo root)
+- forwards the file contents to the agent as-is — `{{KEY}}` substitution and `` !`...` `` shell expansion are not implemented yet (later slices), so the template is plain text today
+- otherwise behaves exactly like the head demo: writes directly to your working tree under the **head** branch strategy, commits, and tears the container down
+
 In another terminal you can follow the JSONL stream:
 
 ```bash
@@ -95,15 +107,16 @@ tail -f .sanddune/logs/*.jsonl
 git log -1
 ls HELLO.md                  # after docker-head-claude-code.ts
 ls MERGE-TO-HEAD-HELLO.md    # after docker-merge-to-head-claude-code.ts
+ls PROMPT-FILE-HELLO.md      # after docker-head-claude-code-prompt-file.ts
 git log sanddune/branch-demo # after docker-branch-claude-code.ts
 ```
 
 If you want to roll either change back:
 
 ```bash
-# head / merge-to-head
+# head / merge-to-head / promptFile
 git reset --hard HEAD~1
-rm -f HELLO.md MERGE-TO-HEAD-HELLO.md
+rm -f HELLO.md MERGE-TO-HEAD-HELLO.md PROMPT-FILE-HELLO.md
 
 # branch (named) — host HEAD was never touched, so just drop the branch
 git branch -D sanddune/branch-demo

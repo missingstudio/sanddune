@@ -1,0 +1,1 @@
+Create a file called PROMPT-FILE-HELLO.md at the repo root containing a single line `hello from a prompt template`. Then commit the change with the message 'add PROMPT-FILE-HELLO.md'. Stop when the commit lands.
