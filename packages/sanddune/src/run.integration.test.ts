@@ -544,6 +544,53 @@ describe("runProgram (integration)", () => {
     expect(closeCalls).toEqual([]);
   });
 
+  test("promptFile substitution failure tears down the worktree", async () => {
+    const promptFile = join(repo, "prompt.md");
+    await writeFile(promptFile, "Work on {{MISSING_KEY}}\n");
+
+    const closeCalls: number[] = [];
+    const provider = makeLocalProcessBindMountProvider(closeCalls);
+    const agent = createAgentProvider({
+      name: "stub",
+      buildCommand: () => "true",
+      parseLine: () => [],
+    });
+
+    const fakeInvoker: AgentInvokerService = {
+      invoke: () => {
+        throw new Error("invoker should not run when substitution fails");
+      },
+    };
+
+    await expect(
+      runProgram(
+        {
+          agent,
+          sandbox: provider,
+          promptFile,
+          cwd: repo,
+          branchStrategy: { type: "branch", branch: "agent/cleanup-test" },
+        },
+        {
+          agentInvokerLayer: Layer.succeed(AgentInvoker, fakeInvoker),
+        },
+      ),
+    ).rejects.toThrow(/\{\{MISSING_KEY\}\}/);
+
+    // The worktree was created (it's needed to resolve {{SOURCE_BRANCH}}) but
+    // must be cleaned up when substitution throws — otherwise we leak a
+    // worktree dir + lock for every bad template.
+    const worktreeDir = join(repo, ".sanddune", "worktrees", "agent-cleanup-test");
+    expect(existsSync(worktreeDir)).toBe(false);
+
+    const lockEntries = runSync("ls", [join(repo, ".sanddune", "locks")], repo)
+      .stdout.trim();
+    expect(lockEntries).toBe("");
+
+    // Sandbox was never created, so no close call.
+    expect(closeCalls).toEqual([]);
+  });
+
   test("env merging rejects overlapping agent and sandbox keys", async () => {
     const provider = createBindMountSandboxProvider({
       name: "test",

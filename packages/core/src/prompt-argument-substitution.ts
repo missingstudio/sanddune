@@ -12,15 +12,26 @@ export interface SubstitutePromptArgsInput {
 
 export interface SubstitutePromptArgsResult {
   readonly text: string;
+  /** Keys present in `promptArgs` that did not appear as `{{KEY}}` in the
+   *  template. Surfaced for the caller to log — this function never warns. */
   readonly unusedKeys: readonly string[];
 }
 
+const KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const PLACEHOLDER_RE = /\{\{([A-Za-z_][A-Za-z0-9_]*)\}\}/g;
 
 export function substitutePromptArgs(
   input: SubstitutePromptArgsInput,
 ): SubstitutePromptArgsResult {
   const { text, promptArgs, sourceBranch, targetBranch } = input;
+
+  for (const key of Object.keys(promptArgs)) {
+    if (!KEY_RE.test(key)) {
+      throw new Error(
+        `Invalid promptArgs key "${key}" — keys must match /^[A-Za-z_][A-Za-z0-9_]*$/ to be referenceable as {{KEY}} in a template.`,
+      );
+    }
+  }
 
   for (const reserved of BUILT_IN_PROMPT_ARGS) {
     if (Object.prototype.hasOwnProperty.call(promptArgs, reserved)) {

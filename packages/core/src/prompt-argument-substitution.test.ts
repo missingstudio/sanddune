@@ -71,6 +71,21 @@ describe("substitutePromptArgs", () => {
     );
   });
 
+  describe("invalid keys", () => {
+    test.each(["issue-num", "1ISSUE", "with space", "key.with.dots", ""] as const)(
+      "rejects promptArgs key %p (cannot match {{KEY}})",
+      (key) => {
+        expect(() =>
+          substitutePromptArgs({
+            text: "noop",
+            promptArgs: { [key]: "v" },
+            ...BRANCHES,
+          }),
+        ).toThrow(/Invalid promptArgs key/);
+      },
+    );
+  });
+
   describe("missing keys", () => {
     test("a placeholder with no matching arg throws naming the key", () => {
       expect(() =>
