@@ -45,10 +45,16 @@ export class HookTimeoutError extends Error {
 export class CopyToWorktreeTimeoutError extends Error {
   readonly _tag = "CopyToWorktreeTimeoutError" as const;
   readonly timeoutMs: number;
+  /** Resolved absolute path of the item being copied when the timeout fired
+   *  — lets callers identify which entry stalled without re-running. */
+  readonly currentItem: string;
 
-  constructor(params: { timeoutMs: number }) {
-    super(`copyToWorktree timed out after ${params.timeoutMs}ms`);
+  constructor(params: { timeoutMs: number; currentItem: string }) {
+    super(
+      `copyToWorktree timed out after ${params.timeoutMs}ms while copying ${params.currentItem}`,
+    );
     this.name = "CopyToWorktreeTimeoutError";
     this.timeoutMs = params.timeoutMs;
+    this.currentItem = params.currentItem;
   }
 }

@@ -47,18 +47,18 @@ describe("runHostHooksSequential", () => {
     expect(log).toBe("a\nb\nc\n");
   });
 
-  test("non-zero exit throws fast with command + exit code", async () => {
-    let secondRan = false;
+  test("non-zero exit throws fast — second hook never runs", async () => {
+    const tmp = `/tmp/sanddune-hookrunner-${Math.random().toString(36).slice(2)}`;
     await expect(
       runHostHooksSequential(
         [
-          { command: "exit 7" },
-          { command: `echo "should-not-run" && false` },
+          { command: `mkdir -p ${tmp} && exit 7` },
+          { command: `touch ${tmp}/second-ran` },
         ],
         undefined,
       ),
     ).rejects.toThrow(/exit 7.*exit 7/s);
-    expect(secondRan).toBe(false);
+    expect(await Bun.file(`${tmp}/second-ran`).exists()).toBe(false);
   });
 
   test("undefined hook list is a no-op", async () => {
@@ -198,6 +198,86 @@ describe("runOnSandboxReadyParallel", () => {
       signal: undefined,
     });
     expect(calls).toHaveLength(0);
+  });
+
+  test("host failure cancels in-flight sandbox hook (no orphan)", async () => {
+    let sandboxAbortReason: unknown;
+    let sandboxResolved = false;
+    const { handle } = makeFakeHandle(
+      (_cmd, options) =>
+        new Promise((resolve, reject) => {
+          options?.signal?.addEventListener("abort", () => {
+            sandboxAbortReason = options.signal!.reason;
+            reject(options.signal!.reason);
+          });
+          setTimeout(() => {
+            sandboxResolved = true;
+            resolve(ok());
+          }, 5000);
+        }),
+    );
+
+    const start = Date.now();
+    await expect(
+      runOnSandboxReadyParallel({
+        hostHooks: [{ command: "exit 9" }],
+        sandboxHooks: [{ command: "slow-setup" }],
+        handle,
+        signal: undefined,
+      }),
+    ).rejects.toThrow(/exit 9/);
+
+    expect(Date.now() - start).toBeLessThan(2000);
+    expect(sandboxResolved).toBe(false);
+    expect(sandboxAbortReason).toBeInstanceOf(Error);
+    expect((sandboxAbortReason as Error).message).toMatch(/exit 9/);
+  });
+
+  test("sandbox failure cancels in-flight host hook (no orphan)", async () => {
+    const { handle } = makeFakeHandle(async () => ({
+      stdout: "",
+      stderr: "",
+      exitCode: 13,
+    }));
+
+    const tmp = `/tmp/sanddune-hookrunner-${Math.random().toString(36).slice(2)}`;
+    const start = Date.now();
+    await expect(
+      runOnSandboxReadyParallel({
+        hostHooks: [
+          { command: `mkdir -p ${tmp} && sleep 5 && touch ${tmp}/done` },
+        ],
+        sandboxHooks: [{ command: "fast-fail" }],
+        handle,
+        signal: undefined,
+      }),
+    ).rejects.toThrow(/exit 13/);
+
+    expect(Date.now() - start).toBeLessThan(2000);
+    expect(await Bun.file(`${tmp}/done`).exists()).toBe(false);
+  });
+
+  test("caller signal aborts both sides and surfaces caller reason", async () => {
+    const { handle } = makeFakeHandle(
+      (_cmd, options) =>
+        new Promise((_resolve, reject) => {
+          options?.signal?.addEventListener("abort", () =>
+            reject(options.signal!.reason),
+          );
+        }),
+    );
+    const reason = new Error("user-cancelled");
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(reason), 50);
+
+    await expect(
+      runOnSandboxReadyParallel({
+        hostHooks: [{ command: "sleep 5" }],
+        sandboxHooks: [{ command: "slow" }],
+        handle,
+        signal: controller.signal,
+      }),
+    ).rejects.toBe(reason);
   });
 });
 
