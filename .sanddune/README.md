@@ -36,9 +36,9 @@ Sanddune reads `.sanddune/.env` at launch — no manual `source` step needed. Pe
 
 ## 4. Run sanddune
 
-There are two runnable demos, one per shipped **branch strategy**. Demo files
-follow `<sandbox>-<strategy>-<agent>.ts` so a glance at the filename tells you
-which combination it exercises.
+There are three runnable demos, one per shipped **branch strategy**. Demo
+files follow `<sandbox>-<strategy>-<agent>.ts` so a glance at the filename
+tells you which combination it exercises.
 
 ### Head (default)
 
@@ -69,6 +69,20 @@ The script:
 - removes the worktree and deletes the temp branch on a clean close; preserves both on disk if the agent left uncommitted work and surfaces the path on `RunResult.worktreePath`
 - prints `host HEAD before` / `host HEAD after` so you can see the merge happened
 
+### Branch (named)
+
+```bash
+bun .sanddune/docker-branch-claude-code.ts
+```
+
+The script:
+
+- creates (or reuses) a worktree under `.sanddune/worktrees/sanddune-branch-demo/` for the named branch `sanddune/branch-demo`
+- runs Claude Code for one iteration; the commit lands on `sanddune/branch-demo`, **not** on host HEAD — there is no merge-back
+- removes the worktree on a clean close; the named branch is preserved on disk so you can `git checkout sanddune/branch-demo` to pick it up
+- re-running the script reuses the worktree (per ADR-0003): a clean reuse logs to stdout, a dirty reuse warns to stderr; the new commit appends to the branch tip
+- prints `host HEAD before` / `host HEAD after` (should match) and the named branch's tip
+
 In another terminal you can follow the JSONL stream:
 
 ```bash
@@ -81,13 +95,18 @@ tail -f .sanddune/logs/*.jsonl
 git log -1
 ls HELLO.md                  # after docker-head-claude-code.ts
 ls MERGE-TO-HEAD-HELLO.md    # after docker-merge-to-head-claude-code.ts
+git log sanddune/branch-demo # after docker-branch-claude-code.ts
 ```
 
 If you want to roll either change back:
 
 ```bash
+# head / merge-to-head
 git reset --hard HEAD~1
 rm -f HELLO.md MERGE-TO-HEAD-HELLO.md
+
+# branch (named) — host HEAD was never touched, so just drop the branch
+git branch -D sanddune/branch-demo
 ```
 
 ## Custom image name
