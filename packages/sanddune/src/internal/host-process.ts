@@ -8,25 +8,16 @@ export interface ProcessResult {
 }
 
 export interface SpawnHostOptions {
-  /** Working directory for the spawned process. */
   readonly cwd?: string;
-  /** Per-stdout-line callback. When provided, stdout is split on newlines and
-   *  each line is delivered as it arrives — useful for streaming agent output
-   *  without buffering the full process output in memory. */
+  /** When set, stdout is split on newlines and each line is delivered as it
+   *  arrives instead of buffered. The captured `stdout` in the result is
+   *  then `lines.join("\n")` (no trailing newline). */
   readonly onLine?: (line: string) => void;
 }
 
-/** Spawn a host-side process, capture its stdout/stderr/exit code, and
- *  resolve once the process exits. Never throws on non-zero exit — callers
- *  decide what's an error.
- *
- *  When `onLine` is set, stdout is delivered line-by-line as it arrives and
- *  the captured `stdout` in the result is `lines.join("\n")` (no trailing
- *  newline). Without `onLine`, stdout is the raw concatenated output.
- *
- *  Single source of truth for sub-process plumbing across the codebase
- *  (git ops, sandbox-provider CLI invocations). Future cross-cutting work
- *  — abort signals (#12), idle timeouts (#11), instrumentation — lands here. */
+/** Never throws on non-zero exit — callers decide what's an error.
+ *  Cross-cutting work (abort #12, idle timeouts #11, instrumentation) should
+ *  land here as the single sub-process plumbing point. */
 export function spawnHost(
   cmd: string,
   args: readonly string[],

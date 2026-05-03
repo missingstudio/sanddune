@@ -38,7 +38,6 @@
     "access": "public"
   },
   "dependencies": {
-    "@missingstudio/sanddune-core": "workspace:*",
     "effect": "^3.21.2"
   }
 }

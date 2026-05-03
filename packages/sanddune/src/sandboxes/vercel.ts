@@ -1,7 +1,7 @@
 import {
   NotImplementedError,
   type IsolatedSandboxProvider,
-} from "@missingstudio/sanddune-core";
+} from "../core";
 
 export interface VercelOptions {
   readonly image?: string;

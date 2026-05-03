@@ -1,4 +1,4 @@
-import type { WorktreePlan } from "@missingstudio/sanddune-core";
+import type { BranchStrategy, SandboxKind } from "../core";
 import { gitBranchDelete, gitMerge } from "./git";
 import {
   createBranchWorktree,
@@ -10,6 +10,10 @@ export interface WorktreeStrategy {
   readonly worktreePath: string;
   readonly sourceBranch: string;
   readonly targetBranch: string;
+  /** The branch surfaced to the caller as `RunResult.branch` — where the
+   *  agent's commits end up. Equals `targetBranch` for `head` and
+   *  `merge-to-head` (after fast-forward back), `sourceBranch` for `branch`. */
+  readonly resultBranch: string;
   /** Run after the iteration loop succeeds and before final commit reconciliation.
    *  No-op for `head` and `branch`; fast-forwards the temp source branch back to
    *  the target branch for `merge-to-head`. */
@@ -20,30 +24,37 @@ export interface WorktreeStrategy {
 }
 
 export interface CreateWorktreeStrategyOptions {
-  readonly plan: WorktreePlan;
+  readonly strategy: BranchStrategy;
+  readonly providerKind: SandboxKind;
   readonly cwd: string;
+  readonly hostBranch: string;
 }
 
 export async function createWorktreeStrategy(
   options: CreateWorktreeStrategyOptions,
 ): Promise<WorktreeStrategy> {
-  switch (options.plan.type) {
-    case "head":
+  const { strategy, providerKind, cwd, hostBranch } = options;
+
+  switch (strategy.type) {
+    case "head": {
+      if (providerKind === "isolated") {
+        throw new Error(
+          `Branch strategy "head" is not allowed with an "isolated" sandbox provider — isolated providers cannot write to the host filesystem.`,
+        );
+      }
       return createHeadStrategy({
-        cwd: options.cwd,
-        sourceBranch: options.plan.sourceBranch,
-        targetBranch: options.plan.targetBranch,
+        cwd,
+        sourceBranch: hostBranch,
+        targetBranch: hostBranch,
       });
+    }
     case "merge-to-head":
-      return createMergeToHeadStrategy({
-        cwd: options.cwd,
-        targetBranch: options.plan.targetBranch,
-      });
+      return createMergeToHeadStrategy({ cwd, targetBranch: hostBranch });
     case "branch":
       return createNamedBranchStrategy({
-        cwd: options.cwd,
-        branch: options.plan.sourceBranch,
-        targetBranch: options.plan.targetBranch,
+        cwd,
+        branch: strategy.branch,
+        targetBranch: hostBranch,
       });
   }
 }
@@ -57,6 +68,7 @@ function createHeadStrategy(args: {
     worktreePath: args.cwd,
     sourceBranch: args.sourceBranch,
     targetBranch: args.targetBranch,
+    resultBranch: args.targetBranch,
     async afterIteration() {},
     async close() {
       return {};
@@ -79,6 +91,7 @@ async function createNamedBranchStrategy(args: {
     worktreePath: worktree.path,
     sourceBranch: worktree.sourceBranch,
     targetBranch: args.targetBranch,
+    resultBranch: worktree.sourceBranch,
     async afterIteration() {},
     async close() {
       try {
@@ -110,6 +123,7 @@ async function createMergeToHeadStrategy(args: {
     worktreePath: worktree.path,
     sourceBranch: worktree.sourceBranch,
     targetBranch: args.targetBranch,
+    resultBranch: args.targetBranch,
     async afterIteration() {
       await gitMerge(args.cwd, worktree.sourceBranch);
       mergeOk = true;

@@ -9,7 +9,7 @@ import type {
   BindMountSandboxProvider,
   IsolatedSandboxProvider,
   NoSandboxProvider,
-} from "@missingstudio/sanddune-core";
+} from "./core";
 import {
   createSandbox,
   createWorktree,
@@ -75,7 +75,6 @@ function _typeChecks() {
     promptArgs: { K: "v" },
   });
 
-  // Positive cases — must continue to compile.
   void interactive({
     agent: agentStub,
     sandbox: noSandboxStub,

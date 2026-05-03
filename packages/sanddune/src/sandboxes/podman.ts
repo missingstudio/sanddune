@@ -1,7 +1,7 @@
 import {
   NotImplementedError,
   type BindMountSandboxProvider,
-} from "@missingstudio/sanddune-core";
+} from "../core";
 
 export interface PodmanOptions {
   readonly image?: string;

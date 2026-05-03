@@ -8,12 +8,12 @@ import { Effect, Layer } from "effect";
 import {
   AgentInvoker,
   type AgentInvokerService,
+  type AgentProvider,
   type BindMountSandboxHandle,
-  createAgentProvider,
-  createBindMountSandboxProvider,
+  type BindMountSandboxProvider,
   type RunOptions,
   type RunSandboxProvider,
-} from "@missingstudio/sanddune-core";
+} from "./core";
 import { runProgram } from "./internal/run-program";
 
 describe("runProgram (integration)", () => {
@@ -37,11 +37,11 @@ describe("runProgram (integration)", () => {
   test("happy path: scripted invoker creates a commit and run resolves", async () => {
     const closeCalls: number[] = [];
     const provider = makeLocalProcessBindMountProvider(closeCalls);
-    const agent = createAgentProvider({
+    const agent: AgentProvider = {
       name: "stub",
       buildCommand: () => "true",
       parseLine: () => [],
-    });
+    };
 
     const invokerCalls: number[] = [];
     const handleRef: { current: BindMountSandboxHandle | undefined } = {
@@ -99,11 +99,11 @@ describe("runProgram (integration)", () => {
   test("teardown runs even when the invoker throws", async () => {
     const closeCalls: number[] = [];
     const provider = makeLocalProcessBindMountProvider(closeCalls);
-    const agent = createAgentProvider({
+    const agent: AgentProvider = {
       name: "stub",
       buildCommand: () => "true",
       parseLine: () => [],
-    });
+    };
 
     const fakeInvoker: AgentInvokerService = {
       invoke: () => Effect.fail(new Error("boom")),
@@ -129,11 +129,11 @@ describe("runProgram (integration)", () => {
   test("merge-to-head: agent commits land on host HEAD after merge-back", async () => {
     const closeCalls: number[] = [];
     const provider = makeLocalProcessBindMountProvider(closeCalls);
-    const agent = createAgentProvider({
+    const agent: AgentProvider = {
       name: "stub",
       buildCommand: () => "true",
       parseLine: () => [],
-    });
+    };
 
     const handleRef: { current: BindMountSandboxHandle | undefined } = {
       current: undefined,
@@ -196,7 +196,6 @@ describe("runProgram (integration)", () => {
       .stdout.trim();
     expect(dirEntries).toBe("");
 
-    // Lock released.
     const lockEntries = runSync("ls", [join(repo, ".sanddune", "locks")], repo)
       .stdout.trim();
     expect(lockEntries).toBe("");
@@ -205,18 +204,17 @@ describe("runProgram (integration)", () => {
     const branchList = runSync("git", ["branch", "--list"], repo).stdout;
     expect(branchList).not.toMatch(/sanddune\/merge-to-head\//);
 
-    // Sandbox close ran exactly once.
     expect(closeCalls).toEqual([1]);
   });
 
   test("merge-to-head: dirty worktree is preserved and surfaced on RunResult.worktreePath", async () => {
     const closeCalls: number[] = [];
     const provider = makeLocalProcessBindMountProvider(closeCalls);
-    const agent = createAgentProvider({
+    const agent: AgentProvider = {
       name: "stub",
       buildCommand: () => "true",
       parseLine: () => [],
-    });
+    };
 
     const handleRef: { current: BindMountSandboxHandle | undefined } = {
       current: undefined,
@@ -264,7 +262,6 @@ describe("runProgram (integration)", () => {
     expect(result.commits).toHaveLength(1);
     expect(result.branch).toBe("main");
 
-    // Worktree was preserved on disk; result surfaces the path.
     expect(result.worktreePath).toBeDefined();
     expect(existsSync(result.worktreePath!)).toBe(true);
     expect(existsSync(join(result.worktreePath!, "leftover.txt"))).toBe(true);
@@ -285,11 +282,11 @@ describe("runProgram (integration)", () => {
   test("branch (named): new branch is created from HEAD and commits land on it", async () => {
     const closeCalls: number[] = [];
     const provider = makeLocalProcessBindMountProvider(closeCalls);
-    const agent = createAgentProvider({
+    const agent: AgentProvider = {
       name: "stub",
       buildCommand: () => "true",
       parseLine: () => [],
-    });
+    };
 
     const handleRef: { current: BindMountSandboxHandle | undefined } = {
       current: undefined,
@@ -313,7 +310,6 @@ describe("runProgram (integration)", () => {
       agentInvokerLayer: Layer.succeed(AgentInvoker, fakeInvoker.invoker),
     });
 
-    // Branch was created from HEAD and commit lives on it.
     expect(result.commits).toHaveLength(1);
     expect(result.branch).toBe("agent/foo");
 
@@ -331,7 +327,6 @@ describe("runProgram (integration)", () => {
     expect(result.worktreePath).toBeUndefined(); // clean → removed
     expect(existsSync(expectedWorktree)).toBe(false);
 
-    // Lock released.
     const lockEntries = runSync("ls", [join(repo, ".sanddune", "locks")], repo)
       .stdout.trim();
     expect(lockEntries).toBe("");
@@ -370,11 +365,11 @@ describe("runProgram (integration)", () => {
 
     const closeCalls: number[] = [];
     const provider = makeLocalProcessBindMountProvider(closeCalls);
-    const agent = createAgentProvider({
+    const agent: AgentProvider = {
       name: "stub",
       buildCommand: () => "true",
       parseLine: () => [],
-    });
+    };
 
     const handleRef: { current: BindMountSandboxHandle | undefined } = {
       current: undefined,
@@ -414,11 +409,11 @@ describe("runProgram (integration)", () => {
   test("branch (named): dirty worktree is preserved and reused on the next run", async () => {
     const closeCalls1: number[] = [];
     const provider1 = makeLocalProcessBindMountProvider(closeCalls1);
-    const agent = createAgentProvider({
+    const agent: AgentProvider = {
       name: "stub",
       buildCommand: () => "true",
       parseLine: () => [],
-    });
+    };
 
     const handleRef1: { current: BindMountSandboxHandle | undefined } = {
       current: undefined,
@@ -505,11 +500,11 @@ describe("runProgram (integration)", () => {
 
     const closeCalls: number[] = [];
     const provider = makeLocalProcessBindMountProvider(closeCalls);
-    const agent = createAgentProvider({
+    const agent: AgentProvider = {
       name: "stub",
       buildCommand: () => "true",
       parseLine: () => [],
-    });
+    };
 
     const handleRef: { current: BindMountSandboxHandle | undefined } = {
       current: undefined,
@@ -550,11 +545,11 @@ describe("runProgram (integration)", () => {
 
     const closeCalls: number[] = [];
     const provider = makeLocalProcessBindMountProvider(closeCalls);
-    const agent = createAgentProvider({
+    const agent: AgentProvider = {
       name: "stub",
       buildCommand: () => "true",
       parseLine: () => [],
-    });
+    };
 
     const fakeInvoker: AgentInvokerService = {
       invoke: () => {
@@ -592,19 +587,20 @@ describe("runProgram (integration)", () => {
   });
 
   test("env merging rejects overlapping agent and sandbox keys", async () => {
-    const provider = createBindMountSandboxProvider({
+    const provider: BindMountSandboxProvider = {
+      kind: "bind-mount",
       name: "test",
       env: { SHARED_KEY: "from-sandbox" },
       create: async () => {
         throw new Error("create should not be called");
       },
-    });
-    const agent = createAgentProvider({
+    };
+    const agent: AgentProvider = {
       name: "stub",
       env: { SHARED_KEY: "from-agent" },
       buildCommand: () => "true",
       parseLine: () => [],
-    });
+    };
 
     const fakeInvoker: AgentInvokerService = {
       invoke: () => Effect.succeed({ events: [] }),
@@ -624,10 +620,269 @@ describe("runProgram (integration)", () => {
       ),
     ).rejects.toThrow(/SHARED_KEY/);
   });
+
+  describe("iteration loop", () => {
+    test("terminates early when a completion-signal substring matches in a text event", async () => {
+      const closeCalls: number[] = [];
+      const provider = makeLocalProcessBindMountProvider(closeCalls);
+      const agent: AgentProvider = {
+        name: "stub",
+        buildCommand: () => "true",
+        parseLine: () => [],
+      };
+
+      const invoked: number[] = [];
+      const fakeInvoker: AgentInvokerService = {
+        invoke: ({ iteration }) =>
+          Effect.succeed({
+            events: [
+              {
+                type: "text" as const,
+                content:
+                  iteration === 2
+                    ? "almost there <promise>COMPLETE</promise> bye\n"
+                    : `iteration ${iteration} chugging along\n`,
+                iteration,
+                timestamp: Date.now(),
+              },
+            ],
+          }),
+      };
+      const countingInvoker: AgentInvokerService = {
+        invoke: (input) => {
+          invoked.push(input.iteration);
+          return fakeInvoker.invoke(input);
+        },
+      };
+
+      const result = await runProgram(
+        {
+          agent,
+          sandbox: provider,
+          prompt: "go",
+          cwd: repo,
+          maxIterations: 5,
+        },
+        { agentInvokerLayer: Layer.succeed(AgentInvoker, countingInvoker) },
+      );
+
+      expect(invoked).toEqual([1, 2]);
+      expect(result.iterations).toHaveLength(2);
+      expect(result.completionSignal).toBe("<promise>COMPLETE</promise>");
+      expect(result.iterations[1]?.completionSignal).toBe(
+        "<promise>COMPLETE</promise>",
+      );
+      expect(result.iterations[0]?.completionSignal).toBeUndefined();
+      expect(closeCalls).toEqual([1]);
+    });
+
+    test("stops at maxIterations when no completion signal is emitted", async () => {
+      const closeCalls: number[] = [];
+      const provider = makeLocalProcessBindMountProvider(closeCalls);
+      const agent: AgentProvider = {
+        name: "stub",
+        buildCommand: () => "true",
+        parseLine: () => [],
+      };
+
+      const invoked: number[] = [];
+      const fakeInvoker: AgentInvokerService = {
+        invoke: ({ iteration }) => {
+          invoked.push(iteration);
+          return Effect.succeed({ events: [] });
+        },
+      };
+
+      const result = await runProgram(
+        {
+          agent,
+          sandbox: provider,
+          prompt: "go",
+          cwd: repo,
+          maxIterations: 3,
+        },
+        { agentInvokerLayer: Layer.succeed(AgentInvoker, fakeInvoker) },
+      );
+
+      expect(invoked).toEqual([1, 2, 3]);
+      expect(result.iterations).toHaveLength(3);
+      expect(result.completionSignal).toBeUndefined();
+    });
+
+    test("custom completionSignal as a string overrides the default", async () => {
+      const closeCalls: number[] = [];
+      const provider = makeLocalProcessBindMountProvider(closeCalls);
+      const agent: AgentProvider = {
+        name: "stub",
+        buildCommand: () => "true",
+        parseLine: () => [],
+      };
+
+      const fakeInvoker: AgentInvokerService = {
+        invoke: ({ iteration }) =>
+          Effect.succeed({
+            events: [
+              {
+                type: "text" as const,
+                content: "DONE\n",
+                iteration,
+                timestamp: Date.now(),
+              },
+            ],
+          }),
+      };
+
+      const result = await runProgram(
+        {
+          agent,
+          sandbox: provider,
+          prompt: "go",
+          cwd: repo,
+          maxIterations: 5,
+          completionSignal: "DONE",
+        },
+        { agentInvokerLayer: Layer.succeed(AgentInvoker, fakeInvoker) },
+      );
+
+      expect(result.completionSignal).toBe("DONE");
+      expect(result.iterations).toHaveLength(1);
+    });
+
+    test("completionSignal as an array — first match across the events stream wins", async () => {
+      const closeCalls: number[] = [];
+      const provider = makeLocalProcessBindMountProvider(closeCalls);
+      const agent: AgentProvider = {
+        name: "stub",
+        buildCommand: () => "true",
+        parseLine: () => [],
+      };
+
+      const fakeInvoker: AgentInvokerService = {
+        invoke: ({ iteration }) =>
+          Effect.succeed({
+            events: [
+              {
+                type: "text" as const,
+                content: "first chunk: BRAVO\n",
+                iteration,
+                timestamp: Date.now(),
+              },
+              {
+                type: "text" as const,
+                content: "second chunk: ALPHA\n",
+                iteration,
+                timestamp: Date.now(),
+              },
+            ],
+          }),
+      };
+
+      const result = await runProgram(
+        {
+          agent,
+          sandbox: provider,
+          prompt: "go",
+          cwd: repo,
+          maxIterations: 5,
+          completionSignal: ["ALPHA", "BRAVO"],
+        },
+        { agentInvokerLayer: Layer.succeed(AgentInvoker, fakeInvoker) },
+      );
+
+      expect(result.completionSignal).toBe("BRAVO");
+    });
+
+    test("a pre-aborted signal rejects the run with the supplied reason", async () => {
+      const closeCalls: number[] = [];
+      const provider = makeLocalProcessBindMountProvider(closeCalls);
+      const agent: AgentProvider = {
+        name: "stub",
+        buildCommand: () => "true",
+        parseLine: () => [],
+      };
+      const invoked: number[] = [];
+      const fakeInvoker: AgentInvokerService = {
+        invoke: ({ iteration }) => {
+          invoked.push(iteration);
+          return Effect.succeed({ events: [] });
+        },
+      };
+
+      const controller = new AbortController();
+      controller.abort(new Error("user cancelled"));
+
+      await expect(
+        runProgram(
+          {
+            agent,
+            sandbox: provider,
+            prompt: "go",
+            cwd: repo,
+            maxIterations: 5,
+            signal: controller.signal,
+          },
+          { agentInvokerLayer: Layer.succeed(AgentInvoker, fakeInvoker) },
+        ),
+      ).rejects.toThrow(/user cancelled/);
+
+      expect(invoked).toEqual([]);
+      expect(closeCalls).toEqual([1]);
+    });
+
+    test("template prompts get shell expressions expanded before each iteration", async () => {
+      const promptFile = join(repo, "expand.md");
+      await writeFile(promptFile, "Work on !`echo expanded-token`\n");
+
+      const closeCalls: number[] = [];
+      const provider = makeLocalProcessBindMountProvider(closeCalls);
+      const agent: AgentProvider = {
+        name: "stub",
+        buildCommand: () => "true",
+        parseLine: () => [],
+      };
+
+      const promptsReceived: string[] = [];
+      const fakeInvoker: AgentInvokerService = {
+        invoke: ({ prompt, iteration }) => {
+          promptsReceived.push(prompt);
+          return Effect.succeed({
+            events: [
+              {
+                type: "text" as const,
+                content: "DONE\n",
+                iteration,
+                timestamp: Date.now(),
+              },
+            ],
+          });
+        },
+      };
+
+      const result = await runProgram(
+        {
+          agent,
+          sandbox: provider,
+          promptFile,
+          cwd: repo,
+          maxIterations: 3,
+          completionSignal: "DONE",
+        },
+        { agentInvokerLayer: Layer.succeed(AgentInvoker, fakeInvoker) },
+      );
+
+      expect(promptsReceived).toHaveLength(1);
+      expect(promptsReceived[0]).toContain("expanded-token");
+      expect(promptsReceived[0]).not.toContain("!`echo");
+      expect(result.completionSignal).toBe("DONE");
+    });
+  });
 });
 
-function makeLocalProcessBindMountProvider(closeCalls: number[]) {
-  return createBindMountSandboxProvider({
+function makeLocalProcessBindMountProvider(
+  closeCalls: number[],
+): BindMountSandboxProvider {
+  return {
+    kind: "bind-mount",
     name: "local-process",
     create: async ({ worktreePath }) => ({
       worktreePath,
@@ -652,14 +907,15 @@ function makeLocalProcessBindMountProvider(closeCalls: number[]) {
         closeCalls.push(1);
       },
     }),
-  });
+  };
 }
 
 function capturingProvider(
-  inner: ReturnType<typeof createBindMountSandboxProvider>,
+  inner: BindMountSandboxProvider,
   handleRef: { current: BindMountSandboxHandle | undefined },
-): ReturnType<typeof createBindMountSandboxProvider> {
-  return createBindMountSandboxProvider({
+): BindMountSandboxProvider {
+  return {
+    kind: "bind-mount",
     name: inner.name,
     env: inner.env,
     create: async (options) => {
@@ -667,7 +923,7 @@ function capturingProvider(
       handleRef.current = handle;
       return handle;
     },
-  });
+  };
 }
 
 function scriptedAgent(

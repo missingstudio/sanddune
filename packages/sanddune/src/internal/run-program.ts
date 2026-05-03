@@ -2,22 +2,26 @@ import { Effect, Layer } from "effect";
 import { join, resolve as resolvePath } from "node:path";
 import {
   AgentInvoker,
-  resolveBranchStrategy,
   resolvePrompt,
   substitutePromptArgs,
   type BindMountSandboxHandle,
   type RunOptions,
   type RunResult,
   type RunSandboxProvider,
-  type WorktreePlan,
-} from "@missingstudio/sanddune-core";
+} from "../core";
 import { resolveEnv } from "./env-resolver";
-import { gitCurrentBranch, gitHeadSha, gitNewCommits } from "./git";
+import { gitCurrentBranch, gitHeadSha } from "./git";
 import { openRunLog } from "./run-log";
 import { newRunId } from "./run-id";
 import { makeProductionAgentInvoker } from "./agent-invoker-live";
 import { runIterationLoop } from "./iteration-loop";
 import { createWorktreeStrategy } from "./worktree-strategy";
+
+/** Set to 1 so existing single-iteration callers don't get a cost multiplier
+ *  — multi-iteration is opt-in via `maxIterations`. */
+const DEFAULT_MAX_ITERATIONS = 1;
+/** Per CONTEXT.md. */
+const DEFAULT_COMPLETION_SIGNAL = "<promise>COMPLETE</promise>";
 
 export interface RunProgramTestSeams {
   readonly agentInvokerLayer?: Layer.Layer<AgentInvoker, never, never>;
@@ -45,13 +49,12 @@ export async function runProgram(
   });
   const targetBranch = await gitCurrentBranch(cwd);
 
-  const plan = resolveBranchStrategy({
+  const strategy = await createWorktreeStrategy({
     strategy: options.branchStrategy ?? { type: "head" },
     providerKind: provider.kind,
+    cwd,
     hostBranch: targetBranch,
   });
-
-  const strategy = await createWorktreeStrategy({ plan, cwd });
 
   let runLog: Awaited<ReturnType<typeof openRunLog>> | undefined;
   let handle: BindMountSandboxHandle | undefined;
@@ -83,12 +86,8 @@ export async function runProgram(
 
     await log.runStarted();
 
-    // Capture the pre-run tip of the ref the agent will commit to. For `head`
-    // the worktree path *is* the host cwd, so this is the host HEAD. For
-    // `merge-to-head` the worktree was just created from host HEAD, so its
-    // HEAD matches. For `branch` this is the named branch's tip (or the host
-    // HEAD it was just created from). Anything past this SHA on the worktree's
-    // HEAD after the run is the agent's contribution.
+    // Anything past this SHA on the worktree's HEAD after the loop is the
+    // agent's contribution.
     const beforeSha = await gitHeadSha(strategy.worktreePath);
 
     handle = await provider.create({
@@ -113,24 +112,28 @@ export async function runProgram(
     const loopResult = await Effect.runPromise(
       runIterationLoop({
         prompt: promptText,
+        promptKind: resolvedPrompt.kind,
         runLog: log,
         cwd: strategy.worktreePath,
         beforeSha,
+        maxIterations: options.maxIterations ?? DEFAULT_MAX_ITERATIONS,
+        completionSignals: normalizeCompletionSignals(options.completionSignal),
+        sandboxExec: (cmd) => handle!.exec(cmd),
+        signal: options.signal,
       }).pipe(Effect.provide(agentInvokerLayer)),
     );
 
     await strategy.afterIteration();
-    // Read commits off the worktree's HEAD — the worktree (whether host cwd
-    // for `head`, the temp branch for `merge-to-head`, or the named branch
-    // for `branch`) is always where the agent's commits land first.
-    const commits = await gitNewCommits(strategy.worktreePath, beforeSha);
 
     resultBase = {
-      branch: resultBranchFor(plan),
+      branch: strategy.resultBranch,
       iterations: loopResult.iterations,
-      commits,
+      commits: loopResult.commits,
       stdout: loopResult.stdout,
       logFilePath: log.path,
+      ...(loopResult.completionSignal !== undefined && {
+        completionSignal: loopResult.completionSignal,
+      }),
     };
   } catch (error) {
     if (runLog) {
@@ -146,8 +149,7 @@ export async function runProgram(
     throw error;
   }
 
-  // Reaching this point means the try block succeeded — runLog and resultBase
-  // are both assigned. The catch arm always rethrows.
+  // The catch arm always rethrows, so reaching here implies both are assigned.
   const finalLog = runLog!;
   const finalResult = resultBase!;
 
@@ -159,16 +161,6 @@ export async function runProgram(
   return preservedPath !== undefined
     ? { ...finalResult, worktreePath: preservedPath }
     : finalResult;
-}
-
-function resultBranchFor(plan: WorktreePlan): string {
-  switch (plan.type) {
-    case "head":
-    case "merge-to-head":
-      return plan.targetBranch;
-    case "branch":
-      return plan.sourceBranch;
-  }
 }
 
 async function closeHandleSafely(
@@ -183,4 +175,12 @@ async function closeHandleSafely(
       }\n`,
     );
   }
+}
+
+function normalizeCompletionSignals(
+  raw: string | readonly string[] | undefined,
+): readonly string[] {
+  if (raw === undefined) return [DEFAULT_COMPLETION_SIGNAL];
+  if (typeof raw === "string") return [raw];
+  return raw;
 }

@@ -25,7 +25,7 @@ A TypeScript library for orchestrating AI coding agents in isolated sandboxes.
 
 | Surface                             | Status     | Notes                                                                            |
 | ----------------------------------- | ---------- | -------------------------------------------------------------------------------- |
-| `run()`                             | ✅ shipped | Single iteration, bind-mount only, inline `prompt` only                          |
+| `run()`                             | ✅ shipped | Bind-mount only; inline `prompt` and `promptFile`; multi-iteration via `maxIterations` + `completionSignal` |
 | `docker()` sandbox provider         | ✅ shipped | Bind-mount, auto image-exists check, parent `.git` re-mount for worktrees        |
 | `claudeCode()` agent provider       | ✅ shipped | `--print --output-format stream-json --verbose --dangerously-skip-permissions`   |
 | `branchStrategy: { type: "head" }`         | ✅ shipped | Default. Agent writes directly to host working tree.                             |
@@ -33,7 +33,7 @@ A TypeScript library for orchestrating AI coding agents in isolated sandboxes.
 | `branchStrategy: { type: "branch", branch }` | ✅ shipped | Named branch in a worktree; reused on re-run            |
 | Env resolution                       | ✅ shipped | `.sanddune/.env` + agent/sandbox `env` + `RunOptions.env`         |
 | JSONL run log                        | ✅ shipped | Streamed to `.sanddune/logs/<run-id>.jsonl`                                      |
-| `createBindMountSandboxProvider()`   | ✅ shipped | Build your own bind-mount`                                    |
+| Custom bind-mount provider           | ✅ shipped | Build your own by constructing a `BindMountSandboxProvider` |
 
 ## Quick start
 
@@ -86,7 +86,7 @@ A run goes through three phases:
 2. **Agent invocation** — invoke the agent with the (inline) prompt, stream JSON events into the run log, capture stdout text events.
 3. **Teardown** — read commits off the worktree HEAD, fast-forward back to the host branch (`merge-to-head` only), tear down the container, and clean up the worktree (preserving it on disk if dirty).
 
-Today the iteration loop runs exactly once. `maxIterations`, `completionSignal`, idle/total timeouts, and abort signals are designed but not wired — see [What's implemented today](#whats-implemented-today).
+The iteration loop honors `maxIterations` (default `1`), `completionSignal` (default `<promise>COMPLETE</promise>`, substring-matched against the agent's text events; first match across iterations wins), and `signal` (checked between iterations — mid-iteration kill of the agent subprocess is a follow-up). For **prompt templates**, **prompt expansion** evaluates `` !`shell expressions` `` once per iteration before the agent is invoked. Idle/total timeouts and **agent session** capture are not yet wired.
 
 ## Branch strategies
 
@@ -157,11 +157,11 @@ const result = await run({
 | `branchStrategy` | `BranchStrategy`                | `head` (default) / `merge-to-head` / `branch`                  |
 | `env`            | `Record<string, string>`        | Call-site env override; highest precedence (ADR-0012)          |
 
-Exactly one of `prompt` / `promptFile` is required. On the template path, sanddune now performs host-side `{{KEY}}` substitution before the agent runs: every `{{KEY}}` placeholder is replaced with its value from `promptArgs`, plus the built-in arguments `{{SOURCE_BRANCH}}` and `{{TARGET_BRANCH}}` (resolved from the active branch strategy). Passing `SOURCE_BRANCH` or `TARGET_BRANCH` in `promptArgs` throws — built-ins cannot be overridden. A `{{KEY}}` with no matching arg throws naming the key; unused `promptArgs` keys log a warning. Inline `prompt` skips substitution entirely (per ADR-0008), and combining `prompt` with `promptArgs` throws. The `expandPrompt()` module that evaluates `` !`command` `` shell expressions in parallel against a sandbox-side `exec` is implemented and exported from `@missingstudio/sanddune-core`, but is not yet wired into `run()` — that ships with the hook-ordering slice.
+Exactly one of `prompt` / `promptFile` is required. On the template path, sanddune now performs host-side `{{KEY}}` substitution before the agent runs: every `{{KEY}}` placeholder is replaced with its value from `promptArgs`, plus the built-in arguments `{{SOURCE_BRANCH}}` and `{{TARGET_BRANCH}}` (resolved from the active branch strategy). Passing `SOURCE_BRANCH` or `TARGET_BRANCH` in `promptArgs` throws — built-ins cannot be overridden. A `{{KEY}}` with no matching arg throws naming the key; unused `promptArgs` keys log a warning. Inline `prompt` skips substitution entirely (per ADR-0008), and combining `prompt` with `promptArgs` throws. The `expandPrompt()` module that evaluates `` !`command` `` shell expressions in parallel against a sandbox-side `exec` is implemented and exported from `@missingstudio/sanddune`, but is not yet wired into `run()` — that ships with the hook-ordering slice.
 
 #### Accepted by the type but not yet wired
 
-`maxIterations`, `completionSignal`, `hooks`, `timeouts`, `logging`, `signal`, `resumeSession`, `copyToWorktree`. Silently ignored. Don't depend on them.
+`hooks`, `timeouts`, `logging`, `resumeSession`, `copyToWorktree`. Silently ignored. Don't depend on them.
 
 ### `RunResult`
 
@@ -169,19 +169,19 @@ Exactly one of `prompt` / `promptFile` is required. On the template path, sanddu
 interface RunResult {
   branch: string;                  // result branch — host's active branch (head/merge-to-head) or named branch
   worktreePath?: string;           // set when the worktree was preserved on disk after a dirty close
-  iterations: IterationResult[];   // length === 1 today
-  commits: string[];               // SHAs reachable from worktree HEAD past the pre-run tip
-  completionSignal?: string;       // never set today (signals not implemented)
+  iterations: IterationResult[];   // one entry per iteration that ran
+  commits: string[];               // SHAs reachable from worktree HEAD past the pre-run tip, ordered by iteration
+  completionSignal?: string;       // the matched completion-signal string, if the loop terminated by signal
   stdout: string;                  // concatenated text events from the agent stream
   logFilePath: string;             // path to the JSONL run log
 }
 
 interface IterationResult {
-  iteration: number;               // 1
-  commitSha?: string;              // last commit on the worktree, if any
+  iteration: number;
+  commitSha?: string;              // last commit produced on this iteration, if any
   sessionFilePath?: string;        // not set today (capture not implemented)
   usage?: IterationUsage;          // not set today
-  completionSignal?: string;       // not set today
+  completionSignal?: string;       // set on the iteration that matched the completion signal
 }
 ```
 
@@ -240,34 +240,34 @@ Today's `ClaudeCodeOptions` is `{ env? }`. The `effort` and `captureSessions` op
 
 ### Custom bind-mount providers
 
-If you want to wrap something other than Docker (a different container runtime, an SSH host, a local subprocess), implement `createBindMountSandboxProvider`:
+If you want to wrap something other than Docker (a different container runtime, an SSH host, a local subprocess), construct a `BindMountSandboxProvider` directly:
 
 ```typescript
-import {
-  createBindMountSandboxProvider,
-  type BindMountCreateOptions,
-  type BindMountSandboxHandle,
+import type {
+  BindMountCreateOptions,
+  BindMountSandboxHandle,
+  BindMountSandboxProvider,
 } from "@missingstudio/sanddune";
 
-const myProvider = () =>
-  createBindMountSandboxProvider({
-    name: "my-provider",
-    create: async (opts: BindMountCreateOptions): Promise<BindMountSandboxHandle> => {
-      // opts.worktreePath  — host path to mount into your sandbox
-      // opts.hostRepoPath  — caller's `cwd`, e.g. for default image-name derivation
-      // opts.env           — resolved env vars to inject
+const myProvider = (): BindMountSandboxProvider => ({
+  kind: "bind-mount",
+  name: "my-provider",
+  create: async (opts: BindMountCreateOptions): Promise<BindMountSandboxHandle> => {
+    // opts.worktreePath  — host path to mount into your sandbox
+    // opts.hostRepoPath  — caller's `cwd`, e.g. for default image-name derivation
+    // opts.env           — resolved env vars to inject
 
-      return {
-        worktreePath: "/workspace",                // sandbox-side path
-        exec: async (command, execOpts) => ({
-          stdout: "...",
-          stderr: "...",
-          exitCode: 0,
-        }),
-        close: async () => { /* tear down */ },
-      };
-    },
-  });
+    return {
+      worktreePath: "/workspace",                // sandbox-side path
+      exec: async (command, execOpts) => ({
+        stdout: "...",
+        stderr: "...",
+        exitCode: 0,
+      }),
+      close: async () => { /* tear down */ },
+    };
+  },
+});
 ```
 
 Reference implementation: [`packages/sanddune/src/sandboxes/docker.ts`](packages/sanddune/src/sandboxes/docker.ts).

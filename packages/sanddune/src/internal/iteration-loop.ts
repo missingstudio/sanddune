@@ -1,29 +1,38 @@
 import { Effect } from "effect";
 import {
   AgentInvoker,
+  expandPrompt,
   type IterationResult,
-} from "@missingstudio/sanddune-core";
+  type ResolvedPrompt,
+  type SandboxExec,
+} from "../core";
 import { gitNewCommits } from "./git";
 import type { RunLog } from "./run-log";
 
 export interface IterationLoopInput {
+  /** Post-`substitutePromptArgs` text. For templates, the loop runs
+   *  `expandPrompt` before each iteration; for inline prompts it is passed
+   *  to the agent verbatim. */
   readonly prompt: string;
+  readonly promptKind: ResolvedPrompt["kind"];
   readonly runLog: RunLog;
   readonly cwd: string;
   readonly beforeSha: string;
+  readonly maxIterations: number;
+  /** First match across iterations wins; empty array disables detection. */
+  readonly completionSignals: readonly string[];
+  readonly sandboxExec: SandboxExec;
+  /** Checked between iterations; mid-iteration kill of the agent subprocess
+   *  needs `signal` threaded into `spawnHost` and is a follow-up. */
+  readonly signal?: AbortSignal;
 }
 
 export interface IterationLoopResult {
   readonly iterations: readonly IterationResult[];
   readonly commits: readonly string[];
   readonly stdout: string;
+  readonly completionSignal?: string;
 }
-
-const fromPromise = <T>(thunk: () => Promise<T>) =>
-  Effect.tryPromise({
-    try: thunk,
-    catch: (e) => (e instanceof Error ? e : new Error(String(e))),
-  });
 
 export const runIterationLoop = (
   input: IterationLoopInput,
@@ -32,36 +41,84 @@ export const runIterationLoop = (
     const invoker = yield* AgentInvoker;
     const stdoutChunks: string[] = [];
     const iterations: IterationResult[] = [];
+    const allCommits: string[] = [];
+    let lastSha = input.beforeSha;
+    let matchedSignal: string | undefined;
 
-    const iteration = 1;
-    yield* fromPromise(() => input.runLog.iterationStarted(iteration));
+    for (let iteration = 1; iteration <= input.maxIterations; iteration += 1) {
+      throwIfAborted(input.signal);
 
-    const result = yield* invoker.invoke({
-      prompt: input.prompt,
-      iteration,
-    });
-    for (const event of result.events) {
-      if (event.type === "text") stdoutChunks.push(event.content);
+      let promptForIteration = input.prompt;
+      if (input.promptKind === "template") {
+        const expanded = yield* fromPromise(() =>
+          expandPrompt({ text: input.prompt, exec: input.sandboxExec }),
+        );
+        promptForIteration = expanded.text;
+      }
+
+      yield* fromPromise(() => input.runLog.iterationStarted(iteration));
+
+      const result = yield* invoker.invoke({
+        prompt: promptForIteration,
+        iteration,
+      });
+
+      let signalMatched: string | undefined;
+      for (const event of result.events) {
+        if (event.type !== "text") continue;
+        stdoutChunks.push(event.content);
+        if (signalMatched !== undefined) continue;
+        for (const sig of input.completionSignals) {
+          if (sig.length > 0 && event.content.includes(sig)) {
+            signalMatched = sig;
+            break;
+          }
+        }
+      }
+      if (signalMatched === undefined && result.completionSignal !== undefined) {
+        signalMatched = result.completionSignal;
+      }
+
+      const newCommits = yield* fromPromise(() =>
+        gitNewCommits(input.cwd, lastSha),
+      );
+      allCommits.push(...newCommits);
+      const lastCommit = newCommits.at(-1) ?? null;
+      if (lastCommit !== null) lastSha = lastCommit;
+
+      yield* fromPromise(() =>
+        input.runLog.iterationEnded(iteration, lastCommit),
+      );
+
+      iterations.push({
+        iteration,
+        ...(lastCommit !== null && { commitSha: lastCommit }),
+        ...(signalMatched !== undefined && { completionSignal: signalMatched }),
+      });
+
+      if (signalMatched !== undefined) {
+        matchedSignal = signalMatched;
+        break;
+      }
     }
-
-    const commits = yield* fromPromise(() =>
-      gitNewCommits(input.cwd, input.beforeSha),
-    );
-    const lastCommit = commits.at(-1) ?? null;
-
-    yield* fromPromise(() =>
-      input.runLog.iterationEnded(iteration, lastCommit),
-    );
-
-    iterations.push(
-      lastCommit !== null
-        ? { iteration, commitSha: lastCommit }
-        : { iteration },
-    );
 
     return {
       iterations,
-      commits,
+      commits: allCommits,
       stdout: stdoutChunks.join(""),
+      ...(matchedSignal !== undefined && { completionSignal: matchedSignal }),
     };
   });
+
+const fromPromise = <T>(thunk: () => Promise<T>) =>
+  Effect.tryPromise({
+    try: thunk,
+    catch: (e) => (e instanceof Error ? e : new Error(String(e))),
+  });
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (!signal?.aborted) return;
+  const reason = signal.reason;
+  if (reason instanceof Error) throw reason;
+  throw new Error(typeof reason === "string" ? reason : "aborted");
+}

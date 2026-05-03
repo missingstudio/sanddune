@@ -1,28 +1,17 @@
 import { readFile } from "node:fs/promises";
 
-/** Resolve the env map that sanddune will hand to the sandbox.
+/** Per ADR-0012, env is **declaration-driven**: a key reaches the sandbox
+ *  iff some declaration site claimed it. `process.env` only supplies values
+ *  for already-declared keys.
  *
- *  Per ADR-0012, env is **declaration-driven**: a key reaches the sandbox iff
- *  some declaration site claimed it. `process.env` is only consulted as a
- *  value source for already-declared keys — host shell vars (HOME, PATH, ...)
- *  do not leak into the sandbox by default.
- *
- *  Declaration sites (each also a value source):
- *  - `.sanddune/.env` (read from `sandduneEnvPath`)
- *  - **agent provider** `env`
- *  - **sandbox provider** `env`
- *  - `RunOptions.env`
- *
- *  Value precedence for a declared key (highest wins):
+ *  Value precedence (highest wins):
  *      runOptionsEnv > agentEnv > sandboxEnv > .sanddune/.env > process.env
  *
- *  A declared key that has no value in any layer is dropped (rather than
- *  surfaced as an empty string). The disjointness rule between
- *  `agentEnv` and `sandboxEnv` is enforced — overlap throws. */
+ *  Keys with no value in any layer are dropped (not surfaced as ""). Agent
+ *  and sandbox env must be disjoint — overlap throws. */
 export interface ResolveEnvInput {
   readonly processEnv: NodeJS.ProcessEnv;
-  /** Absolute path to `.sanddune/.env`. Missing file is fine — treated as
-   *  an empty declaration set. */
+  /** Missing file is treated as an empty declaration set. */
   readonly sandduneEnvPath: string;
   readonly agentEnv?: Readonly<Record<string, string>>;
   readonly sandboxEnv?: Readonly<Record<string, string>>;
@@ -44,8 +33,6 @@ export async function resolveEnv(
     );
   }
 
-  // Declaration sites: file + agent + sandbox + runOptions. process.env
-  // never declares.
   const declared = new Set<string>([
     ...Object.keys(fileEnv),
     ...Object.keys(agent),

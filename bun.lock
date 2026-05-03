@@ -22,24 +22,12 @@
         "sanddune": "./dist/index.js",
       },
     },
-    "packages/core": {
-      "name": "@missingstudio/sanddune-core",
-      "version": "0.0.0",
-      "dependencies": {
-        "effect": "^3.21.2",
-      },
-    },
     "packages/sanddune": {
       "name": "@missingstudio/sanddune",
       "version": "0.0.0",
       "dependencies": {
-        "@missingstudio/sanddune-core": "workspace:*",
         "effect": "^3.21.2",
       },
-    },
-    "packages/test-utils": {
-      "name": "@missingstudio/sanddune-test-utils",
-      "version": "0.0.0",
     },
   },
   "packages": {
@@ -88,10 +76,6 @@
     "@missingstudio/sanddune": ["@missingstudio/sanddune@workspace:packages/sanddune"],
 
     "@missingstudio/sanddune-cli": ["@missingstudio/sanddune-cli@workspace:packages/cli"],
-
-    "@missingstudio/sanddune-core": ["@missingstudio/sanddune-core@workspace:packages/core"],
-
-    "@missingstudio/sanddune-test-utils": ["@missingstudio/sanddune-test-utils@workspace:packages/test-utils"],
 
     "@nodelib/fs.scandir": ["@nodelib/fs.scandir@2.1.5", "", { "dependencies": { "@nodelib/fs.stat": "2.0.5", "run-parallel": "^1.1.9" } }, "sha512-vq24Bq3ym5HEQm2NKCr3yXDwjc7vTsEThRDnkp2DK9p1uqLR+DHurm/NOTo0KG7HYHU7eppKZj3MyqYuMBf62g=="],
 

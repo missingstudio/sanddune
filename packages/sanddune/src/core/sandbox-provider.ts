@@ -65,18 +65,3 @@ export type AllowedBranchStrategy<S extends SandboxProvider> = [S] extends [
 ]
   ? NonHeadBranchStrategy
   : BranchStrategy;
-
-export function createBindMountSandboxProvider(config: {
-  readonly name: string;
-  readonly env?: Readonly<Record<string, string>>;
-  readonly create: (
-    options: BindMountCreateOptions,
-  ) => Promise<BindMountSandboxHandle>;
-}): BindMountSandboxProvider {
-  return {
-    kind: "bind-mount",
-    name: config.name,
-    env: config.env,
-    create: config.create,
-  };
-}

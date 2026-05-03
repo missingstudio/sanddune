@@ -24,20 +24,3 @@ export interface AgentProvider {
   buildCommand(input: AgentBuildCommandInput): string;
   parseLine(line: string, iteration: number): readonly AgentStreamEvent[];
 }
-
-export function createAgentProvider(config: {
-  readonly name: string;
-  readonly env?: Readonly<Record<string, string>>;
-  readonly buildCommand: (input: AgentBuildCommandInput) => string;
-  readonly parseLine: (
-    line: string,
-    iteration: number,
-  ) => readonly AgentStreamEvent[];
-}): AgentProvider {
-  return {
-    name: config.name,
-    env: config.env,
-    buildCommand: config.buildCommand,
-    parseLine: config.parseLine,
-  };
-}

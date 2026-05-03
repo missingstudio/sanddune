@@ -1,12 +1,11 @@
 import { resolve } from "node:path";
-import {
-  createBindMountSandboxProvider,
-  type BindMountCreateOptions,
-  type BindMountSandboxHandle,
-  type BindMountSandboxProvider,
-  type ExecOptions,
-  type ExecResult,
-} from "@missingstudio/sanddune-core";
+import type {
+  BindMountCreateOptions,
+  BindMountSandboxHandle,
+  BindMountSandboxProvider,
+  ExecOptions,
+  ExecResult,
+} from "../core";
 import {
   defaultImageName,
   resolveParentGitMount,
@@ -22,7 +21,8 @@ export interface DockerOptions {
 const SANDBOX_WORKTREE = "/workspace";
 
 export function docker(options?: DockerOptions): BindMountSandboxProvider {
-  return createBindMountSandboxProvider({
+  return {
+    kind: "bind-mount",
     name: "docker",
     env: options?.env,
     create: async (
@@ -52,7 +52,7 @@ export function docker(options?: DockerOptions): BindMountSandboxProvider {
         },
       };
     },
-  });
+  };
 }
 
 async function ensureImageExists(image: string): Promise<void> {

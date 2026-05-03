@@ -1,4 +1,4 @@
-import { NotImplementedError } from "@missingstudio/sanddune-core";
+import { NotImplementedError } from "./core";
 import type {
   CreateSandboxOptions,
   CreateSandboxProvider,
@@ -10,10 +10,10 @@ import type {
   RunSandboxProvider,
   Sandbox,
   Worktree,
-} from "@missingstudio/sanddune-core";
+} from "./core";
 import { runProgram } from "./internal/run-program";
 
-export * from "@missingstudio/sanddune-core";
+export * from "./core";
 export { claudeCode, type ClaudeCodeOptions } from "./agents/claude-code";
 
 export function run<S extends RunSandboxProvider>(

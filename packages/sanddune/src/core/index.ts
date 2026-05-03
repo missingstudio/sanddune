@@ -1,7 +1,5 @@
 export { NotImplementedError } from "./errors";
 export { AgentInvoker } from "./agent-invoker";
-export { createAgentProvider } from "./agent-provider";
-export { createBindMountSandboxProvider } from "./sandbox-provider";
 
 export type {
   BranchStrategy,
@@ -10,12 +8,6 @@ export type {
   NamedBranchStrategy,
   NonHeadBranchStrategy,
 } from "./branch-strategy";
-
-export { resolveBranchStrategy } from "./resolve-branch-strategy";
-export type {
-  ResolveBranchStrategyInput,
-  WorktreePlan,
-} from "./resolve-branch-strategy";
 
 export type {
   AgentInvokeInput,

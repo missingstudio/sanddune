@@ -1,7 +1,7 @@
 import {
   NotImplementedError,
   type NoSandboxProvider,
-} from "@missingstudio/sanddune-core";
+} from "../core";
 
 export interface NoSandboxOptions {
   readonly env?: Readonly<Record<string, string>>;

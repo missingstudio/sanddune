@@ -4,7 +4,7 @@ import type {
   AgentProvider,
   AgentStreamEvent,
   BindMountSandboxHandle,
-} from "@missingstudio/sanddune-core";
+} from "../core";
 
 export function makeProductionAgentInvoker(params: {
   readonly agentProvider: AgentProvider;

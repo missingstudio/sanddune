@@ -1,29 +1,16 @@
 import type { ExecResult } from "./sandbox-provider";
 
-/**
- * Matches a shell expression `` !`command` `` in a prompt template.
- *
- * The body is non-greedy: anything except a backtick. There is no escape
- * mechanism for literal backticks inside the command — by design, the syntax
- * is meant for short fetches (`gh issue view 42`, `git log -1`). Multi-line
- * bodies are allowed (the body matcher does not exclude newlines), but in
- * practice every expression is a single line.
- */
+// No escape mechanism for literal backticks — the syntax is meant for short
+// fetches (`gh issue view 42`, `git log -1`).
 const SHELL_EXPRESSION_RE = /!`([^`]*)`/g;
 
-/**
- * The sandbox-side command runner. `ExecOptions` (cwd, sudo, onLine) is
- * deliberately not plumbed: shell expressions are short, default-cwd fetches,
- * and per-command options would require a syntax extension. Out of scope here.
- */
+/** `ExecOptions` (cwd, sudo, onLine) is not plumbed: shell expressions are
+ *  short, default-cwd fetches; per-command options would need a syntax
+ *  extension. */
 export type SandboxExec = (command: string) => Promise<ExecResult>;
 
 export interface ExpandPromptInput {
   readonly text: string;
-  /**
-   * The sandbox-side command runner. In `run()` this is bound to the live
-   * sandbox handle's `exec`; in tests it is a fake.
-   */
   readonly exec: SandboxExec;
 }
 
@@ -31,20 +18,11 @@ export interface ExpandPromptResult {
   readonly text: string;
 }
 
-/**
- * Performs **prompt expansion**: evaluates every **shell expression**
- * (`` !`command` ``) in the **prompt** by running the command **inside the
- * sandbox** and replacing the marker with the command's stdout (trailing
- * newlines trimmed, matching POSIX `$(cmd)` semantics).
- *
- * All shell expressions in a single prompt run in parallel. A non-zero exit
- * — or a thrown rejection from `exec` itself (e.g. sandbox died) — rejects
- * the call with the offending command attached for context; remaining
- * commands continue to run on the sandbox but their results are discarded.
- *
- * Inline prompts skip this stage entirely — the caller is responsible for
- * that gating (see ADR-0008 / `resolvePrompt`).
- */
+/** Trailing newlines on each command's stdout are stripped (POSIX `$(cmd)`
+ *  semantics). All shell expressions in a single prompt run in parallel; a
+ *  non-zero exit — or a thrown rejection from `exec` (e.g. sandbox died) —
+ *  rejects with the offending command. Inline prompts skip this entirely
+ *  per ADR-0008 (caller-side gating). */
 export async function expandPrompt(
   input: ExpandPromptInput,
 ): Promise<ExpandPromptResult> {

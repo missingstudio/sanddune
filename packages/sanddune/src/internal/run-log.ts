@@ -1,6 +1,6 @@
 import { mkdir, open, type FileHandle } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import type { AgentStreamEvent } from "@missingstudio/sanddune-core";
+import type { AgentStreamEvent } from "../core";
 
 export type RunLogRecord =
   | { readonly type: "run-start"; readonly timestamp: number }

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { NotImplementedError } from "@missingstudio/sanddune-core";
+import { NotImplementedError } from "./core";
 import { createSandbox, createWorktree, interactive } from "./index";
 import { docker } from "./sandboxes/docker";
 import { noSandbox } from "./sandboxes/no-sandbox";

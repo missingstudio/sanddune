@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, test, expect } from "bun:test";
-import { createAgentProvider } from "@missingstudio/sanddune-core";
+import type { AgentProvider } from "./core";
 import { run } from "./index";
 import { docker } from "./sandboxes/docker";
 
@@ -23,7 +23,7 @@ describe.skipIf(!E2E_ENABLED)("run() against real Docker (smoke)", () => {
       runSync("git", ["add", "."], repo);
       runSync("git", ["commit", "-m", "seed"], repo);
 
-      const shellAgent = createAgentProvider({
+      const shellAgent: AgentProvider = {
         name: "shell-stub",
         buildCommand: () =>
           [
@@ -33,7 +33,7 @@ describe.skipIf(!E2E_ENABLED)("run() against real Docker (smoke)", () => {
             "git -c user.email=agent@example.com -c user.name=agent -c commit.gpgsign=false commit -m 'agent edit'",
           ].join(" && "),
         parseLine: () => [],
-      });
+      };
 
       const result = await run({
         agent: shellAgent,

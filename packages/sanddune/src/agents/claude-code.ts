@@ -1,8 +1,4 @@
-import {
-  createAgentProvider,
-  type AgentProvider,
-  type AgentStreamEvent,
-} from "@missingstudio/sanddune-core";
+import type { AgentProvider, AgentStreamEvent } from "../core";
 
 export interface ClaudeCodeOptions {
   readonly env?: Readonly<Record<string, string>>;
@@ -12,7 +8,7 @@ export function claudeCode(
   model: string,
   options?: ClaudeCodeOptions,
 ): AgentProvider {
-  return createAgentProvider({
+  return {
     name: "claude-code",
     env: options?.env,
     buildCommand: ({ prompt }) => {
@@ -30,7 +26,7 @@ export function claudeCode(
       return args.join(" ");
     },
     parseLine: (line, iteration) => parseClaudeCodeLine(line, iteration),
-  });
+  };
 }
 
 function parseClaudeCodeLine(
