@@ -1,4 +1,4 @@
-import { Effect, Layer } from "effect";
+import { Layer } from "effect";
 import { join, resolve as resolvePath } from "node:path";
 import {
   AgentInvoker,
@@ -9,18 +9,15 @@ import {
   type RunSandboxProvider,
 } from "../core";
 import { resolveEnv } from "./env-resolver";
-import { gitCurrentBranch, gitHeadSha } from "./git";
-import { makeProductionAgentInvoker } from "./agent-invoker-live";
+import { gitCurrentBranch } from "./git";
 import { runCopyToWorktree } from "./copy-to-worktree";
 import {
   runHostHooksSequential,
   runOnSandboxReadyParallel,
 } from "./hook-runner";
-import { runIterationLoop } from "./iteration-loop";
-import { runEffect } from "./run-effect";
+import { runOnHandle } from "./run-on-handle";
 import { openRunSession, type RunSession } from "./run-session";
 import {
-  makeCaptureSessionFn,
   transferSessionToSandbox,
   validateResumeSession,
 } from "./session-capture";
@@ -29,8 +26,6 @@ import { createWorktreeStrategy } from "./worktree-strategy";
 /** Set to 1 so existing single-iteration callers don't get a cost multiplier
  *  — multi-iteration is opt-in via `maxIterations`. */
 const DEFAULT_MAX_ITERATIONS = 1;
-const DEFAULT_COMPLETION_SIGNAL = "<promise>COMPLETE</promise>";
-const DEFAULT_IDLE_TIMEOUT_SECONDS = 600;
 
 export interface RunProgramTestSeams {
   readonly agentInvokerLayer?: Layer.Layer<AgentInvoker, never, never>;
@@ -132,10 +127,6 @@ export async function runProgram(
       options.signal,
     );
 
-    // Anything past this SHA on the worktree's HEAD after the loop is the
-    // agent's contribution.
-    const beforeSha = await gitHeadSha(strategy.worktreePath);
-
     handle = await provider.create({
       worktreePath: strategy.worktreePath,
       hostRepoPath: cwd,
@@ -147,15 +138,15 @@ export async function runProgram(
     // points at a session file that already lives at the in-sandbox path
     // Claude Code expects). Non-Claude agents lack `sessionCapture` and
     // are skipped — the option was already validated above.
-    if (
+    const willResume =
       options.resumeSession !== undefined &&
-      options.agent.sessionCapture !== undefined
-    ) {
+      options.agent.sessionCapture !== undefined;
+    if (willResume) {
       await transferSessionToSandbox({
         handle,
-        capture: options.agent.sessionCapture,
+        capture: options.agent.sessionCapture!,
         hostCwd: cwd,
-        sessionId: options.resumeSession,
+        sessionId: options.resumeSession!,
       });
     }
 
@@ -166,57 +157,28 @@ export async function runProgram(
       signal: options.signal,
     });
 
-    const agentInvokerLayer =
-      seams.agentInvokerLayer ??
-      Layer.succeed(
-        AgentInvoker,
-        makeProductionAgentInvoker({
-          agentProvider: options.agent,
-          handle,
-        }),
-      );
-
-    const captureSession = makeCaptureSessionFn({
+    resultBase = await runOnHandle({
       handle,
+      strategy,
       agent: options.agent,
-      hostCwd: cwd,
+      hostRepoPath: cwd,
+      session,
+      promptPipeline,
+      maxIterations,
+      ...(options.completionSignal !== undefined && {
+        completionSignal: options.completionSignal,
+      }),
+      ...(options.idleTimeoutSeconds !== undefined && {
+        idleTimeoutSeconds: options.idleTimeoutSeconds,
+      }),
+      ...(options.signal !== undefined && { signal: options.signal }),
+      ...(willResume && { resumeSessionId: options.resumeSession! }),
+      ...(seams.agentInvokerLayer !== undefined && {
+        agentInvokerLayer: seams.agentInvokerLayer,
+      }),
     });
 
-    const loopResult = await runEffect(
-      runIterationLoop({
-        getPromptForIteration: () =>
-          promptPipeline.getPromptForIteration((cmd) => handle!.exec(cmd)),
-        logger: session.logger,
-        cwd: strategy.worktreePath,
-        beforeSha,
-        maxIterations,
-        completionSignals: normalizeCompletionSignals(options.completionSignal),
-        idleTimeoutSeconds:
-          options.idleTimeoutSeconds ?? DEFAULT_IDLE_TIMEOUT_SECONDS,
-        ...(options.signal !== undefined && { signal: options.signal }),
-        ...(options.resumeSession !== undefined &&
-          options.agent.sessionCapture !== undefined && {
-          resumeSessionId: options.resumeSession,
-        }),
-        ...(captureSession !== undefined && { captureSession }),
-        onEvent: session.recordAgentEvent,
-      }).pipe(Effect.provide(agentInvokerLayer)),
-    );
-
     await strategy.finalize();
-
-    resultBase = {
-      branch: strategy.resultBranch,
-      iterations: loopResult.iterations,
-      commits: loopResult.commits,
-      stdout: loopResult.stdout,
-      ...(session.logFilePath !== undefined && {
-        logFilePath: session.logFilePath,
-      }),
-      ...(loopResult.completionSignal !== undefined && {
-        completionSignal: loopResult.completionSignal,
-      }),
-    };
   } catch (error) {
     runError = error instanceof Error ? error : new Error(String(error));
   } finally {
@@ -262,12 +224,4 @@ async function closeHandleSafely(
       }\n`,
     );
   }
-}
-
-function normalizeCompletionSignals(
-  raw: string | readonly string[] | undefined,
-): readonly string[] {
-  if (raw === undefined) return [DEFAULT_COMPLETION_SIGNAL];
-  if (typeof raw === "string") return [raw];
-  return raw;
 }

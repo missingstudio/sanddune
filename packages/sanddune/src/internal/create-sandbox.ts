@@ -1,4 +1,4 @@
-import { Effect, Layer } from "effect";
+import { Layer } from "effect";
 import {
   AgentInvoker,
   preparePromptPipeline,
@@ -18,24 +18,14 @@ import {
   buildAgentInteractiveCommand,
   resolveInteractivePrompt,
 } from "./interactive-shared";
-import { makeProductionAgentInvoker } from "./agent-invoker-live";
 import { runCopyToWorktree } from "./copy-to-worktree";
-import { gitHeadSha } from "./git";
 import {
   runHostHooksSequential,
   runOnSandboxReadyParallel,
 } from "./hook-runner";
-import { runIterationLoop, type IterationLoopResult } from "./iteration-loop";
-import { runEffect } from "./run-effect";
+import { runOnHandle } from "./run-on-handle";
 import { openRunSession } from "./run-session";
-import { makeCaptureSessionFn } from "./session-capture";
 import type { WorktreeStrategy } from "./worktree-strategy";
-
-/** Set to 1 so existing single-iteration callers don't get a cost multiplier
- *  — multi-iteration is opt-in via `maxIterations`. Mirrors run-program. */
-const DEFAULT_MAX_ITERATIONS = 1;
-const DEFAULT_COMPLETION_SIGNAL = "<promise>COMPLETE</promise>";
-const DEFAULT_IDLE_TIMEOUT_SECONDS = 600;
 
 export interface CreateSandboxFromWorktreeInput {
   readonly agent: AgentProvider;
@@ -171,7 +161,6 @@ function makeSandboxHandle(input: MakeSandboxHandleInput): Sandbox {
       );
     }
 
-    const maxIterations = options.maxIterations ?? DEFAULT_MAX_ITERATIONS;
     const promptPipeline = await preparePromptPipeline({
       prompt: options.prompt,
       promptFile: options.promptFile,
@@ -193,45 +182,30 @@ function makeSandboxHandle(input: MakeSandboxHandleInput): Sandbox {
       ...(options.name !== undefined && { name: options.name }),
     });
 
-    const beforeSha = await gitHeadSha(strategy.worktreePath);
-
-    const agentInvokerLayer =
-      input.seams?.agentInvokerLayer ??
-      Layer.succeed(
-        AgentInvoker,
-        makeProductionAgentInvoker({
-          agentProvider: agent,
-          handle,
-        }),
-      );
-
-    const captureSession = makeCaptureSessionFn({
-      handle,
-      agent,
-      hostCwd: input.hostRepoPath,
-    });
-
     let runError: Error | undefined;
-    let loopResult: IterationLoopResult | undefined;
+    let result: RunResult | undefined;
     try {
-      loopResult = await runEffect(
-        runIterationLoop({
-          getPromptForIteration: () =>
-            promptPipeline.getPromptForIteration((cmd) => handle.exec(cmd)),
-          logger: session.logger,
-          cwd: strategy.worktreePath,
-          beforeSha,
-          maxIterations,
-          completionSignals: normalizeCompletionSignals(
-            options.completionSignal,
-          ),
-          idleTimeoutSeconds:
-            options.idleTimeoutSeconds ?? DEFAULT_IDLE_TIMEOUT_SECONDS,
-          ...(options.signal !== undefined && { signal: options.signal }),
-          ...(captureSession !== undefined && { captureSession }),
-          onEvent: session.recordAgentEvent,
-        }).pipe(Effect.provide(agentInvokerLayer)),
-      );
+      result = await runOnHandle({
+        handle,
+        strategy,
+        agent,
+        hostRepoPath: input.hostRepoPath,
+        session,
+        promptPipeline,
+        ...(options.maxIterations !== undefined && {
+          maxIterations: options.maxIterations,
+        }),
+        ...(options.completionSignal !== undefined && {
+          completionSignal: options.completionSignal,
+        }),
+        ...(options.idleTimeoutSeconds !== undefined && {
+          idleTimeoutSeconds: options.idleTimeoutSeconds,
+        }),
+        ...(options.signal !== undefined && { signal: options.signal }),
+        ...(input.seams?.agentInvokerLayer !== undefined && {
+          agentInvokerLayer: input.seams.agentInvokerLayer,
+        }),
+      });
     } catch (err) {
       runError = err instanceof Error ? err : new Error(String(err));
     } finally {
@@ -241,21 +215,7 @@ function makeSandboxHandle(input: MakeSandboxHandleInput): Sandbox {
     }
 
     if (runError !== undefined) throw runError;
-    const r = loopResult!;
-
-    const result: RunResult = {
-      branch: strategy.resultBranch,
-      iterations: r.iterations,
-      commits: r.commits,
-      stdout: r.stdout,
-      ...(session.logFilePath !== undefined && {
-        logFilePath: session.logFilePath,
-      }),
-      ...(r.completionSignal !== undefined && {
-        completionSignal: r.completionSignal,
-      }),
-    };
-    return result;
+    return result!;
   };
 
   const close = async (): Promise<CloseResult> => {
@@ -352,12 +312,4 @@ async function closeHandleSafely(
       }\n`,
     );
   }
-}
-
-function normalizeCompletionSignals(
-  raw: string | readonly string[] | undefined,
-): readonly string[] {
-  if (raw === undefined) return [DEFAULT_COMPLETION_SIGNAL];
-  if (typeof raw === "string") return [raw];
-  return raw;
 }
