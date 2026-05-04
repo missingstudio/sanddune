@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { mkdir, realpath, stat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { runGit } from "./git-spawn";
+import { runGit } from "./git";
 import { spawnHost } from "./host-process";
 import {
   acquireWorktreeLock,
