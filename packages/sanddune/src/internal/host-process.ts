@@ -10,9 +10,7 @@ export interface ProcessResult {
 export interface SpawnHostInteractiveOptions {
   readonly cwd?: string;
   readonly env?: Readonly<Record<string, string>>;
-  /** When the signal aborts, the subprocess is killed (SIGTERM) and the
-   *  promise rejects with `signal.reason` verbatim. Pre-aborted signals
-   *  reject before spawn. */
+  /** Abort kills with SIGTERM and rejects with signal.reason verbatim. */
   readonly signal?: AbortSignal;
 }
 
@@ -20,10 +18,7 @@ export interface InteractiveProcessResult {
   readonly exitCode: number;
 }
 
-/** Spawn a host subprocess with stdin/stdout/stderr inherited from the
- *  parent — used to launch an **agent**'s TUI for `interactive()` /
- *  `wt.interactive()`. Resolves when the child exits; never reads or
- *  buffers its output (the user is talking to it directly). */
+/** Inherits stdio — used for an agent's TUI. Never buffers output. */
 export function spawnHostInteractive(
   cmd: string,
   args: readonly string[],
@@ -68,19 +63,15 @@ export function spawnHostInteractive(
 
 export interface SpawnHostOptions {
   readonly cwd?: string;
-  /** When set, stdout is split on newlines and each line is delivered as it
-   *  arrives instead of buffered. The captured `stdout` in the result is
-   *  then `lines.join("\n")` (no trailing newline). */
+  /** Streams stdout line-by-line; result.stdout is then lines.join("\n"). */
   readonly onLine?: (line: string) => void;
-  /** When the signal aborts, the subprocess is killed (SIGTERM) and the
-   *  promise rejects with `signal.reason` verbatim. Pre-aborted signals
-   *  reject before spawn. */
+  /** Abort kills with SIGTERM and rejects with signal.reason verbatim. */
   readonly signal?: AbortSignal;
 }
 
-/** Never throws on non-zero exit — callers decide what's an error.
- *  Cross-cutting work (abort #12, idle timeouts #11, instrumentation) should
- *  land here as the single sub-process plumbing point. */
+/** Never throws on non-zero exit — callers decide what's an error. The
+ *  single subprocess plumbing point for sanddune (abort, timeouts,
+ *  instrumentation all hook here). */
 export function spawnHost(
   cmd: string,
   args: readonly string[],

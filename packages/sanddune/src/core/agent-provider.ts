@@ -18,77 +18,34 @@ export type AgentStreamEvent =
 export interface AgentBuildCommandInput {
   readonly prompt: string;
   readonly iteration: number;
-  /** When set, the **agent provider** appends provider-specific resume args
-   *  (e.g. Claude Code's `--resume <id>`). Forwarded by the **agent invoker**
-   *  on iteration 1 only when `RunOptions.resumeSession` is set; `undefined`
-   *  on every other turn. Providers without resume support ignore it. */
   readonly resumeSessionId?: string;
 }
 
-/** Input passed by `interactive()` / `wt.interactive()` to an **agent
- *  provider**'s `buildInteractiveCommand`. Mirrors `AgentBuildCommandInput`
- *  for AFK runs but adds `skipPermissions` (per-call rather than always-on)
- *  so the orchestrator can decide based on **sandbox kind** whether to
- *  bypass the agent's permission prompts. With **no-sandbox**, the agent
- *  runs directly on the **host** and `skipPermissions` is `false` so the
- *  agent's normal prompts stay active. */
 export interface AgentInteractiveCommandInput {
-  /** Optional initial prompt the agent should open with. When omitted, the
-   *  agent's bare TUI is launched with no seed prompt. */
   readonly prompt?: string;
-  /** When `true`, the agent provider should skip its normal permission
-   *  prompts (e.g. Claude Code's `--dangerously-skip-permissions`). The
-   *  orchestrator sets this for sandboxed providers (bind-mount / isolated)
-   *  and clears it for the **no-sandbox provider**. */
+  /** When true, the provider skips its permission prompts. Cleared for
+   *  no-sandbox so the agent's prompts stay active. */
   readonly skipPermissions: boolean;
 }
 
-/** Agent-specific glue for **agent session** capture and resume. Optional;
- *  agents that have no concept of a resumable session simply omit it and
- *  capture/resume become no-ops at the run-program level.
- *
- *  All paths returned are absolute strings that can be passed to
- *  `BindMountSandboxHandle.exec` (host paths are absolute filesystem paths;
- *  sandbox paths may begin with `~` since they are evaluated by the sandbox
- *  shell). `rewriteCwd` operates on the JSONL text — one record per line —
- *  and is responsible for replacing every entry's `cwd` field from
- *  `fromCwd` to `toCwd` while leaving the rest of the record intact. */
+/** Sandbox paths may begin with `~` (evaluated by the sandbox shell);
+ *  rewriteCwd operates line-by-line over the JSONL. */
 export interface AgentSessionCapture {
-  /** Inspect a raw stream line and return the **agent session** id it
-   *  carries, if any. The first non-undefined return wins for an iteration —
-   *  the **agent invoker** stops calling once it has an id. */
   parseSessionId(line: string): string | undefined;
-  /** Where the captured JSONL is written on the **host**. */
   hostSessionPath(hostCwd: string, sessionId: string): string;
-  /** Where the **agent** writes the JSONL inside the **sandbox** (the file
-   *  the **iteration loop** reads back to capture, and the file resume
-   *  transfers in to). May begin with `~`. */
   sandboxSessionPath(sandboxCwd: string, sessionId: string): string;
-  /** Rewrite all `cwd` fields in the JSONL from `fromCwd` to `toCwd`. */
   rewriteCwd(jsonl: string, fromCwd: string, toCwd: string): string;
-  /** Optional: extract `IterationUsage` (raw token counts) from a captured
-   *  session JSONL. The convention is to read the *last* assistant message
-   *  in the file, since its `usage` field is cumulative for the iteration.
-   *  Returns `undefined` if the JSONL contains no usage data — capture is
-   *  best-effort, so a missing parser or a malformed file leaves
-   *  `IterationResult.usage` `undefined` per ADR 0005b. */
+  /** Convention: read the last assistant message — its usage is cumulative
+   *  for the iteration. */
   parseUsage?(jsonl: string): IterationUsage | undefined;
 }
 
 export interface AgentProvider {
   readonly name: string;
   readonly env?: Readonly<Record<string, string>>;
-  /** Optional **agent session** capture/resume capability. Present iff the
-   *  agent supports it AND the user has not opted out (e.g.
-   *  `claudeCode({ captureSessions: false })`). Absent → capture and
-   *  `resumeSession` become no-ops; `resumeSession` is silently ignored
-   *  rather than rejected, mirroring the brief / CONTEXT.md. */
   readonly sessionCapture?: AgentSessionCapture;
   buildCommand(input: AgentBuildCommandInput): string;
   parseLine(line: string, iteration: number): readonly AgentStreamEvent[];
-  /** Optional. Builds the shell command that launches the agent's TUI for
-   *  `interactive()` / `wt.interactive()`. Agents that do not have an
-   *  interactive UI omit this; calling `interactive()` with such an agent
-   *  rejects at runtime. */
+  /** Omit when the agent has no TUI; interactive() then rejects at runtime. */
   buildInteractiveCommand?(input: AgentInteractiveCommandInput): string;
 }

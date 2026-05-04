@@ -1,17 +1,13 @@
 import { readFile } from "node:fs/promises";
 
-/** Per ADR-0012, env is **declaration-driven**: a key reaches the sandbox
- *  iff some declaration site claimed it. `process.env` only supplies values
- *  for already-declared keys.
- *
- *  Value precedence (highest wins):
+/** Declaration-driven: a key reaches the sandbox only if some site claimed
+ *  it. process.env supplies values for already-declared keys, never declares.
+ *  Precedence (highest wins):
  *      runOptionsEnv > agentEnv > sandboxEnv > .sanddune/.env > process.env
- *
- *  Keys with no value in any layer are dropped (not surfaced as ""). Agent
- *  and sandbox env must be disjoint — overlap throws. */
+ *  Keys with no value anywhere are dropped. Agent/sandbox env must be
+ *  disjoint — overlap throws. */
 export interface ResolveEnvInput {
   readonly processEnv: NodeJS.ProcessEnv;
-  /** Missing file is treated as an empty declaration set. */
   readonly sandduneEnvPath: string;
   readonly agentEnv?: Readonly<Record<string, string>>;
   readonly sandboxEnv?: Readonly<Record<string, string>>;
@@ -67,8 +63,7 @@ function pickValue(
   if (sources.runOptions[key] !== undefined) return sources.runOptions[key];
   if (sources.agent[key] !== undefined) return sources.agent[key];
   if (sources.sandbox[key] !== undefined) return sources.sandbox[key];
-  // Empty string in `.sanddune/.env` means "declared, value comes from
-  // process.env" — skip past the file value if it's empty so we fall through.
+  // Empty `.env` value means "declared, fall through to process.env".
   const fileValue = sources.file[key];
   if (fileValue !== undefined && fileValue.length > 0) return fileValue;
   const processValue = sources.processEnv[key];
@@ -78,10 +73,8 @@ function pickValue(
   return undefined;
 }
 
-/** Parse a `.env` file: `KEY=value` lines, `#` comment support, surrounding
- *  quotes (single or double) stripped, blank lines tolerated. A key with an
- *  empty RHS (`KEY=`) is recorded with an empty string — interpreted by the
- *  resolver as "declared, value from process.env." Missing file → empty map. */
+/** `KEY=` records an empty string — the resolver reads this as "declared,
+ *  value from process.env". Missing file → empty map. */
 export async function parseEnvFile(
   filePath: string,
 ): Promise<Readonly<Record<string, string>>> {

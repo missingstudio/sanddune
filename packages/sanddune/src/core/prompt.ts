@@ -12,10 +12,7 @@ export type PromptOption =
       readonly promptArgs?: PromptArgs;
     };
 
-/** Like `PromptOption`, but every field is optional — the user may launch
- *  `interactive()` / `wt.interactive()` with no seed prompt at all. The
- *  `prompt` + `promptFile` and `prompt` + `promptArgs` mutual-exclusion
- *  rules still hold. */
+/** Mutual-exclusion of prompt+promptFile and prompt+promptArgs still holds. */
 export type OptionalPromptOption =
   | {
       readonly prompt?: string;

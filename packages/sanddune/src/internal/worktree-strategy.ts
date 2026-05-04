@@ -11,16 +11,12 @@ export interface WorktreeStrategy {
   readonly worktreePath: string;
   readonly sourceBranch: string;
   readonly targetBranch: string;
-  /** The branch surfaced to the caller as `RunResult.branch` — where the
-   *  agent's commits end up. Equals `targetBranch` for `head` and
-   *  `merge-to-head` (after fast-forward back), `sourceBranch` for `branch`. */
+  /** Equals targetBranch for head/merge-to-head; sourceBranch for branch. */
   readonly resultBranch: string;
-  /** Run once after the iteration loop succeeds and before final commit
-   *  reconciliation. No-op for `head` and `branch`; fast-forwards the temp
-   *  source branch back to the target branch for `merge-to-head`. */
+  /** No-op for head/branch; fast-forwards source back to target for
+   *  merge-to-head. */
   finalize(): Promise<void>;
-  /** Tears down any worktree, lock, or temp branch this strategy created.
-   *  Never throws — logs to stderr and returns `{}` on internal failure. */
+  /** Never throws — logs to stderr on internal failure. */
   close(): Promise<{ preservedPath?: string }>;
 }
 
@@ -82,9 +78,8 @@ async function createNamedBranchStrategy(args: {
   branch: string;
   targetBranch: string;
 }): Promise<WorktreeStrategy> {
-  // Evict admin entries left behind by previous runs killed before close().
-  // Only relevant for `branch` (deterministic path → collisions possible);
-  // `merge-to-head` uses random ids and `head` doesn't create a worktree.
+  // Branch paths are deterministic so a previous killed run can collide;
+  // merge-to-head uses random ids and head has no worktree.
   await pruneStaleWorktrees(args.cwd);
 
   const worktree: ManagedWorktree = await createBranchWorktree({

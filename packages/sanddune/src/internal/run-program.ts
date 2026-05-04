@@ -23,8 +23,6 @@ import {
 } from "./session-capture";
 import { createWorktreeStrategy } from "./worktree-strategy";
 
-/** Set to 1 so existing single-iteration callers don't get a cost multiplier
- *  — multi-iteration is opt-in via `maxIterations`. */
 const DEFAULT_MAX_ITERATIONS = 1;
 
 export interface RunProgramTestSeams {
@@ -45,11 +43,8 @@ export async function runProgram(
   const cwd = resolvePath(options.cwd ?? process.cwd());
   const maxIterations = options.maxIterations ?? DEFAULT_MAX_ITERATIONS;
 
-  // Validates RESUME options on the **host** before any sandbox/worktree
-  // side effects: bad combos (resume + maxIterations > 1) and a missing
-  // host session file should fail fast, not after a stray container has
-  // already been spun up. Non-Claude agents have no `sessionCapture` and
-  // are silently ignored here.
+  // Validate before any sandbox/worktree side effects so bad combos fail
+  // fast rather than after a container is up.
   if (options.resumeSession !== undefined) {
     await validateResumeSession({
       resumeSession: options.resumeSession,
@@ -76,10 +71,6 @@ export async function runProgram(
     hostBranch: targetBranch,
   });
 
-  // Single try/finally owns teardown for: prompt-pipeline failures, sandbox
-  // handle, run session, and the worktree strategy. Both success and error
-  // paths go through the same teardown sequence — adding a new managed
-  // resource means one place, not two.
   let runError: Error | undefined;
   let session: RunSession | undefined;
   let handle: BindMountSandboxHandle | undefined;
@@ -87,9 +78,8 @@ export async function runProgram(
   let preservedPath: string | undefined;
 
   try {
-    // Validates options + reads/substitutes the template on the host before
-    // the sandbox is created, so file-not-found / bad placeholders fail fast
-    // (and route through the worktree teardown in the finally block).
+    // Prepare on the host before any sandbox spins up — a bad template or
+    // missing placeholder must fail fast.
     const promptPipeline = await preparePromptPipeline({
       prompt: options.prompt,
       promptFile: options.promptFile,
@@ -110,9 +100,6 @@ export async function runProgram(
       ...(options.name !== undefined && { name: options.name }),
     });
 
-    // Lifecycle (CONTEXT.md): copyToWorktree → host.onWorktreeReady →
-    // sandbox created → host.onSandboxReady ∥ sandbox.onSandboxReady.
-    // All threaded with the caller's signal so abort cancels mid-step.
     await runCopyToWorktree({
       items: options.copyToWorktree,
       cwd,
@@ -133,11 +120,8 @@ export async function runProgram(
       env,
     });
 
-    // Resume must happen after the sandbox exists (we write into it via
-    // `exec`) but before any iteration runs (so iteration 1's `--resume`
-    // points at a session file that already lives at the in-sandbox path
-    // Claude Code expects). Non-Claude agents lack `sessionCapture` and
-    // are skipped — the option was already validated above.
+    // Must run after sandbox creation (writes via exec) and before the
+    // first iteration (so --resume sees the file already in place).
     const willResume =
       options.resumeSession !== undefined &&
       options.agent.sessionCapture !== undefined;
@@ -182,10 +166,9 @@ export async function runProgram(
   } catch (error) {
     runError = error instanceof Error ? error : new Error(String(error));
   } finally {
-    // Teardown order matches pre-refactor behaviour: write the run-end record
-    // first (so the file captures the original error promptly), then close
-    // the sandbox handle, then the worktree strategy. Each step swallows its
-    // own errors so one failure doesn't mask another.
+    // run-end first (to capture the original error in the log), then
+    // sandbox, then worktree. Each step swallows so one teardown failure
+    // doesn't mask another.
     if (session !== undefined) {
       await (runError !== undefined
         ? session.endError(runError.message)
@@ -205,7 +188,6 @@ export async function runProgram(
 
   if (runError !== undefined) throw runError;
 
-  // Reaching here implies success: resultBase was assigned in the try block.
   const finalResult = resultBase!;
   return preservedPath !== undefined
     ? { ...finalResult, worktreePath: preservedPath }

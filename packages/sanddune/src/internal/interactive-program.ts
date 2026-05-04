@@ -27,9 +27,6 @@ import {
   type WorktreeStrategy,
 } from "./worktree-strategy";
 
-/** Top-level `interactive()`. Owns the **worktree** lifecycle for the
- *  duration of the TUI session and tears it down on exit (ADR-0010 — top
- *  level is the bundled-convenience path). */
 export async function interactiveProgram(
   options: InteractiveOptions<InteractiveSandboxProvider>,
 ): Promise<void> {
@@ -81,15 +78,10 @@ export interface RunInteractiveSessionInput {
   readonly timeouts: Timeouts | undefined;
   readonly copyToWorktree: readonly string[] | undefined;
   readonly signal: AbortSignal | undefined;
-  /** When `true`, this function tears down the worktree strategy on exit
-   *  (top-level `interactive()`). When `false`, the caller owns it
-   *  (`wt.interactive()` — parent `Worktree` survives the TUI session). */
+  /** When false, the caller owns worktree teardown (`wt.interactive()`). */
   readonly ownsWorktree: boolean;
 }
 
-/** Shared lifecycle for top-level `interactive()` and `wt.interactive()`.
- *  Performs `copyToWorktree` → `host.onWorktreeReady` → branch on sandbox
- *  kind to launch the TUI → `finalize()` → optional worktree teardown. */
 export async function runInteractiveSession(
   input: RunInteractiveSessionInput,
 ): Promise<void> {
@@ -154,10 +146,8 @@ export async function runInteractiveSession(
         ...(input.signal !== undefined && { signal: input.signal }),
       });
     } else {
-      // no-sandbox: run the agent directly on the host. Sandbox-side hooks
-      // are skipped silently — they have no place to run. Host-side
-      // onSandboxReady still fires (for callers that just want a
-      // pre-launch host hook).
+      // no-sandbox: agent runs directly on the host. Sandbox-side hooks are
+      // silently skipped; host-side onSandboxReady still fires.
       await runHostHooksSequential(
         input.hooks?.host?.onSandboxReady,
         input.signal,
@@ -189,8 +179,6 @@ export async function runInteractiveSession(
       });
     }
 
-    // For `merge-to-head`, ff-merge the temp source branch back into HEAD.
-    // No-op for `head` / `branch`. Only on success.
     await input.strategy.finalize();
   } catch (err) {
     runError = err instanceof Error ? err : new Error(String(err));
@@ -213,9 +201,6 @@ export async function runInteractiveSession(
 }
 
 function defaultBranchStrategy(kind: string): BranchStrategy {
-  // Mirrors ADR-0009: bind-mount and no-sandbox default to head; isolated
-  // would default to merge-to-head (rejected later because isolated isn't
-  // implemented for interactive).
   return kind === "isolated" ? { type: "merge-to-head" } : { type: "head" };
 }
 

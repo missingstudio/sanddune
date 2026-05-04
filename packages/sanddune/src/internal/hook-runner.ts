@@ -13,8 +13,6 @@ type SandboxHook = NonNullable<
   NonNullable<SandboxHooks["sandbox"]>["onSandboxReady"]
 >[number];
 
-/** Runs `host.onWorktreeReady` (or any host-hook list) in declared order.
- *  Stops at the first non-zero exit or timeout. */
 export async function runHostHooksSequential(
   hooks: ReadonlyArray<HostHook> | undefined,
   signal: AbortSignal | undefined,
@@ -23,15 +21,8 @@ export async function runHostHooksSequential(
   for (const hook of hooks) await runHostHook(hook, signal);
 }
 
-/** Kicks off `host.onSandboxReady` and `sandbox.onSandboxReady` in parallel.
- *  Within each side the hooks still run sequentially. Per CONTEXT.md the two
- *  sides are not coordinated — setup that needs ordering across host/sandbox
- *  must live entirely on one side.
- *
- *  Both sides see a signal that aborts when EITHER the caller aborts OR the
- *  sibling side rejects. Without that, a fast-failing side would leave the
- *  other running — orphan sandbox work after `run()` has thrown, and an
- *  unhandled rejection if the loser later throws too. */
+/** Both sides abort when either the caller aborts OR the sibling rejects,
+ *  so a fast-failing side cancels the other rather than leaving it running. */
 export async function runOnSandboxReadyParallel(input: {
   readonly hostHooks: ReadonlyArray<HostHook> | undefined;
   readonly sandboxHooks: ReadonlyArray<SandboxHook> | undefined;

@@ -35,11 +35,6 @@ export async function createSandboxProgram(
 
   const targetBranch = await gitCurrentBranch(cwd);
 
-  // `branch: string` is the only knob — long-lived sandboxes are
-  // single-branch by construction, so there is no `branchStrategy`
-  // surface here (CONTEXT.md "createSandbox opts out of the branch
-  // strategy abstraction"). Stale-worktree hygiene now lives inside
-  // `createWorktreeStrategy` for the `branch` case.
   const strategy = await createWorktreeStrategy({
     strategy: { type: "branch", branch: options.branch },
     providerKind: provider.kind,
@@ -47,8 +42,6 @@ export async function createSandboxProgram(
     hostBranch: targetBranch,
   });
 
-  // On lifecycle failure, the helper closes any partial container and (because
-  // `ownsWorktree` is true here) unwinds the worktree before rethrowing.
   const sandbox = await createSandboxFromWorktree({
     agent: options.agent,
     provider,
@@ -66,11 +59,6 @@ export async function createSandboxProgram(
   return installSignalPreservation(sandbox, strategy.worktreePath);
 }
 
-/** Install SIGINT/SIGTERM handlers that print worktree-recovery instructions
- *  before the process exits, so a Ctrl-C mid-run doesn't leave the user
- *  stranded with a worktree they don't know how to clean up. Handlers are
- *  removed when the returned sandbox's `close()` (or `Symbol.asyncDispose`)
- *  fires the normal teardown path. */
 function installSignalPreservation(
   sandbox: Sandbox,
   worktreePath: string,

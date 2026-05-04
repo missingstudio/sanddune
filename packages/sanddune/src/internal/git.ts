@@ -2,9 +2,8 @@ import { spawnHost, type ProcessResult } from "./host-process";
 
 export type { ProcessResult };
 
-/** Run a `git` invocation in `cwd`. Throws on non-zero exit, with the
- *  command and stderr included in the error. Use `spawnHost` directly when
- *  the exit code itself carries meaning (e.g. `git show-ref --verify`). */
+/** Throws on non-zero exit. Use spawnHost directly when the exit code
+ *  carries meaning (e.g. `git show-ref --verify`). */
 export async function runGit(
   cwd: string,
   args: readonly string[],
@@ -45,10 +44,8 @@ export async function gitNewCommits(
 }
 
 export async function gitMerge(cwd: string, sourceBranch: string): Promise<void> {
-  // Prefer fast-forward — keeps the SHAs from the source branch unchanged on
-  // the target branch. If the host moved during the run (rare), fall back to
-  // a regular merge commit using the user's existing git identity so the
-  // agent's work isn't lost.
+  // Fast-forward preserves source SHAs; fall back to a merge commit if the
+  // host moved during the run.
   try {
     await runGit(cwd, ["merge", "--ff-only", sourceBranch]);
   } catch {

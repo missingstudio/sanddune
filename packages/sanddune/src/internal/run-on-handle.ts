@@ -18,10 +18,6 @@ const DEFAULT_MAX_ITERATIONS = 1;
 const DEFAULT_COMPLETION_SIGNAL = "<promise>COMPLETE</promise>";
 const DEFAULT_IDLE_TIMEOUT_SECONDS = 600;
 
-/** Inputs for one **handle-bound run** (CONTEXT.md). The caller has already
- *  brought the sandbox up, prepared the **prompt pipeline**, and opened the
- *  **run session**; we drive one bounded **iteration loop** against the live
- *  handle and return the assembled `RunResult`. */
 export interface RunOnHandleInput {
   readonly handle: BindMountSandboxHandle;
   readonly strategy: WorktreeStrategy;
@@ -33,11 +29,7 @@ export interface RunOnHandleInput {
   readonly completionSignal?: string | readonly string[];
   readonly idleTimeoutSeconds?: number;
   readonly signal?: AbortSignal;
-  /** Set by `runProgram` after `transferSessionToSandbox` succeeds; never
-   *  passed by `Sandbox.run` (resume is a fresh-sandbox concern, see
-   *  CONTEXT.md). */
   readonly resumeSessionId?: string;
-  /** Test seam: substitute a fake **agent invoker**. */
   readonly agentInvokerLayer?: Layer.Layer<AgentInvoker, never, never>;
 }
 
@@ -45,10 +37,7 @@ export async function runOnHandle(input: RunOnHandleInput): Promise<RunResult> {
   const { handle, strategy, agent, session, promptPipeline } = input;
   const maxIterations = input.maxIterations ?? DEFAULT_MAX_ITERATIONS;
 
-  // Anything past this SHA on the worktree's HEAD after the loop is the
-  // agent's contribution. Captured here (after sandbox-up hooks have run)
-  // because no commit-producing operation is expected between this point
-  // and the iteration loop entry.
+  // Commits past this SHA after the loop are the agent's contribution.
   const beforeSha = await gitHeadSha(strategy.worktreePath);
 
   const agentInvokerLayer =

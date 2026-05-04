@@ -8,10 +8,7 @@ import type {
 
 export interface ClaudeCodeOptions {
   readonly env?: Readonly<Record<string, string>>;
-  /** Capture each iteration's **agent session** JSONL from the **sandbox**
-   *  to the **host** (default `true`). Set `false` to opt out — capture
-   *  becomes a no-op and `IterationResult.sessionId` /
-   *  `IterationResult.sessionFilePath` stay `undefined`. */
+  /** Default true. */
   readonly captureSessions?: boolean;
 }
 
@@ -101,9 +98,7 @@ function parseClaudeCodeLine(
   return events;
 }
 
-/** Claude Code's on-disk path encoding: take the absolute path, replace every
- *  `/` with `-`. So `/Users/me/repo` becomes `-Users-me-repo`. Matches the
- *  layout under `~/.claude/projects/` that `claude --resume` reads from. */
+// Matches `~/.claude/projects/` encoding: `/` → `-`, e.g. `-Users-me-repo`.
 function encodeProjectDir(absPath: string): string {
   return absPath.replace(/\//g, "-");
 }
@@ -137,13 +132,12 @@ const claudeCodeSessionCapture: AgentSessionCapture = {
     const lines = jsonl.split("\n");
     return lines
       .map((line, idx) => {
-        // Preserve a final trailing newline (split produces an empty tail).
+        // Preserve trailing newline (split produces an empty tail).
         if (line.length === 0 && idx === lines.length - 1) return line;
         let parsed: unknown;
         try {
           parsed = JSON.parse(line);
         } catch {
-          // Best-effort: leave malformed lines untouched.
           return line;
         }
         if (!isRecord(parsed)) return line;
@@ -153,8 +147,7 @@ const claudeCodeSessionCapture: AgentSessionCapture = {
       .join("\n");
   },
   parseUsage(jsonl) {
-    // Walk the file backwards: the last assistant message carries the most
-    // recent (cumulative) usage counts for the iteration.
+    // Last assistant message carries cumulative usage for the iteration.
     const lines = jsonl.split("\n");
     for (let i = lines.length - 1; i >= 0; i -= 1) {
       const line = lines[i];

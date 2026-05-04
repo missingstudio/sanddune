@@ -15,15 +15,10 @@ export interface ResolveInteractivePromptInput {
   readonly promptInput: InteractivePromptInput;
   readonly sourceBranch: string;
   readonly targetBranch: string;
-  /** Adapter the **prompt pipeline** uses to evaluate any shell expressions
-   *  in template prompts inside the live sandbox. Plain inline / inert
-   *  templates never call the adapter. */
   readonly execAdapter: (command: string) => Promise<ExecResult>;
 }
 
-/** Resolve the seed prompt for an interactive session. Returns `undefined`
- *  when the caller passed neither `prompt` nor `promptFile` — the agent's TUI
- *  will start with no preloaded message. */
+/** Returns undefined when the caller passed neither prompt nor promptFile. */
 export async function resolveInteractivePrompt(
   input: ResolveInteractivePromptInput,
 ): Promise<string | undefined> {

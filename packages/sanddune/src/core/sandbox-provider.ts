@@ -10,15 +10,13 @@ export interface ExecOptions {
   readonly cwd?: string;
   readonly sudo?: boolean;
   readonly onLine?: (line: string) => void;
-  /** When the signal aborts, the underlying subprocess is killed (SIGTERM)
-   *  and the returned promise rejects with `signal.reason` verbatim. */
+  /** Abort kills with SIGTERM and rejects with signal.reason verbatim. */
   readonly signal?: AbortSignal;
 }
 
 export interface ExecInteractiveOptions {
   readonly cwd?: string;
-  /** When the signal aborts, the underlying subprocess is killed (SIGTERM)
-   *  and the returned promise rejects with `signal.reason` verbatim. */
+  /** Abort kills with SIGTERM and rejects with signal.reason verbatim. */
   readonly signal?: AbortSignal;
 }
 
@@ -37,10 +35,8 @@ export interface BindMountCreateOptions {
 export interface BindMountSandboxHandle {
   readonly worktreePath: string;
   exec(command: string, options?: ExecOptions): Promise<ExecResult>;
-  /** Optional. Run a command with the host's stdin/stdout/stderr inherited
-   *  so the user can interact with the **agent**'s TUI. Used by
-   *  `interactive()` / `wt.interactive()`. Providers that omit this method
-   *  cannot be used by `interactive()`; the orchestrator throws clearly. */
+  /** Inherits host stdio for an agent's TUI. Providers that omit this
+   *  cannot be used by interactive(). */
   execInteractive?(
     command: string,
     options?: ExecInteractiveOptions,
@@ -78,11 +74,7 @@ export interface NoSandboxProvider {
   readonly env?: Readonly<Record<string, string>>;
 }
 
-/** The umbrella type for everything a sandbox provider can be. Discriminated
- *  by `kind`: narrowing on `kind === "bind-mount"` gives access to `create()`
- *  on the **bind-mount sandbox provider** arm. The variant interfaces stay
- *  exported for adapter authors who want to name the specific shape they
- *  return. */
+/** Discriminated by `kind`. */
 export type SandboxProvider =
   | BindMountSandboxProvider
   | IsolatedSandboxProvider

@@ -39,8 +39,7 @@ export type WorktreeInteractiveOptions<
   S extends InteractiveSandboxProvider = InteractiveSandboxProvider,
 > = OptionalPromptOption & {
   readonly agent: AgentProvider;
-  /** Optional. Defaults to a `noSandbox()` provider — agent runs directly on
-   *  the **host** in the **worktree**. */
+  /** Defaults to noSandbox() — agent runs directly on the host. */
   readonly sandbox?: S;
   readonly env?: Readonly<Record<string, string>>;
   readonly hooks?: SandboxHooks;
@@ -68,10 +67,8 @@ export interface Worktree {
   run(options: WorktreeRunOptions): Promise<RunResult>;
   interactive(options: WorktreeInteractiveOptions): Promise<void>;
   createSandbox(options: WorktreeCreateSandboxOptions): Promise<Sandbox>;
-  /** Tears down only the worktree (ADR-0010 — sandboxes spawned via
-   *  `wt.createSandbox()` must be closed by the caller first). Dirty
-   *  worktrees are preserved on disk and surfaced via
-   *  `CloseResult.preservedWorktreePath`. */
+  /** Sandboxes spawned via wt.createSandbox() must be closed by the caller
+   *  first. Dirty worktrees are preserved on disk. */
   close(): Promise<CloseResult>;
   [Symbol.asyncDispose](): Promise<void>;
 }

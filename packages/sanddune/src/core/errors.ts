@@ -7,11 +7,8 @@ export class NotImplementedError extends Error {
   }
 }
 
-/** Sanddune-defined `AbortSignal.reason` raised when an iteration produces
- *  no agent stream event for `idleTimeoutSeconds` (per ADR-0011). The
- *  iteration loop synthesizes an abort with this as the reason; the
- *  rejection from `run()` / `Sandbox.run()` / `Worktree.run()` carries it
- *  verbatim. */
+/** Raised when an iteration produces no agent stream event for
+ *  idleTimeoutSeconds. Surfaces verbatim as the run rejection reason. */
 export class AgentIdleTimeoutError extends Error {
   readonly _tag = "AgentIdleTimeoutError" as const;
   readonly idleTimeoutSeconds: number;
@@ -45,8 +42,6 @@ export class HookTimeoutError extends Error {
 export class CopyToWorktreeTimeoutError extends Error {
   readonly _tag = "CopyToWorktreeTimeoutError" as const;
   readonly timeoutMs: number;
-  /** Resolved absolute path of the item being copied when the timeout fired
-   *  — lets callers identify which entry stalled without re-running. */
   readonly currentItem: string;
 
   constructor(params: { timeoutMs: number; currentItem: string }) {

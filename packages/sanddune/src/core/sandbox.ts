@@ -22,11 +22,9 @@ export interface CreateSandboxOptions<
   readonly copyToWorktree?: readonly string[];
 }
 
-/** Per-call options for `sandbox.run()`. Equals top-level `RunOptions` minus
- *  the fields that are inherited from `createSandbox()` (`cwd`,
- *  `branchStrategy`, `copyToWorktree`, `hooks`, `timeouts`) and minus
- *  `resumeSession` — Claude **agent session** chaining is a fresh-sandbox
- *  concern only (per #14, ADR / CONTEXT). */
+/** Equals RunOptions minus fields inherited from createSandbox() (cwd,
+ *  branchStrategy, copyToWorktree, hooks, timeouts) and minus resumeSession
+ *  — agent session chaining is a fresh-sandbox concern. */
 export type SandboxRunOptions = PromptOption & {
   readonly name?: string;
   readonly maxIterations?: number;
@@ -35,14 +33,9 @@ export type SandboxRunOptions = PromptOption & {
   readonly env?: Readonly<Record<string, string>>;
   readonly logging?: LoggingOption;
   readonly signal?: AbortSignal;
-  /** Rejected at the type level — see SandboxRunOptions docstring. */
   readonly resumeSession?: never;
 };
 
-/** Per-call options for `sandbox.interactive()`. Like top-level
- *  `InteractiveOptions` minus the fields inherited from `createSandbox()`
- *  (`cwd`, `branchStrategy`, `copyToWorktree`, `hooks`, `timeouts`). The
- *  prompt is optional — callers may launch a TUI with no seed. */
 export type SandboxInteractiveOptions = OptionalPromptOption & {
   readonly env?: Readonly<Record<string, string>>;
   readonly signal?: AbortSignal;
@@ -50,11 +43,9 @@ export type SandboxInteractiveOptions = OptionalPromptOption & {
 
 export interface CloseResult {
   readonly worktreePreserved: boolean;
-  /** Set only when the worktree was dirty at close — per #5, dirty worktrees
-   *  are preserved on disk so the user can recover work; clean worktrees are
-   *  removed. Always `undefined` when the **sandbox** was created via
-   *  `wt.createSandbox()` (worktree ownership lives with the parent
-   *  `Worktree`, not the sandbox — ADR-0010). */
+  /** Set only when the worktree was dirty at close. Always undefined for
+   *  sandboxes created via wt.createSandbox() (worktree ownership lives with
+   *  the parent Worktree). */
   readonly preservedWorktreePath?: string;
 }
 

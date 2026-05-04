@@ -3,8 +3,6 @@ import { isAbsolute, resolve as resolvePath } from "node:path";
 import type { PromptArgs } from "./prompt";
 import type { ExecResult } from "./sandbox-provider";
 
-/** Caller-supplied executor used by the pipeline to evaluate **shell
- *  expressions** inside the **sandbox** during each **iteration**. */
 export type SandboxExec = (command: string) => Promise<ExecResult>;
 
 export const BUILT_IN_PROMPT_ARGS = ["SOURCE_BRANCH", "TARGET_BRANCH"] as const;
@@ -14,29 +12,17 @@ export interface PromptPipelineInput {
   readonly prompt?: string;
   readonly promptFile?: string;
   readonly promptArgs?: PromptArgs;
-  /** Used to substitute the **built-in prompt argument** `{{SOURCE_BRANCH}}`. */
   readonly sourceBranch: string;
-  /** Used to substitute the **built-in prompt argument** `{{TARGET_BRANCH}}`. */
   readonly targetBranch: string;
 }
 
 export interface PreparedPromptPipeline {
-  /** Keys present in `promptArgs` that did not appear as `{{KEY}}` in the
-   *  template. Surfaced for the caller to log. Empty for **inline prompts** and
-   *  for templates that referenced every supplied key. */
   readonly unusedPromptArgKeys: readonly string[];
-  /** Resolves the prompt text for the next **iteration**. For **inline
-   *  prompts** and for **prompt templates** with no **shell expressions**,
-   *  returns the same string every call without invoking `exec`. For templates
-   *  with shell expressions, evaluates them inside the sandbox each call. */
+  /** Returns a frozen string for inline / shell-expression-free templates;
+   *  evaluates shell expressions inside the sandbox otherwise. */
   getPromptForIteration(exec: SandboxExec): Promise<string>;
 }
 
-/** Prepare the **prompt** pipeline for one **run session**. Validates options,
- *  reads the file (template), runs **prompt argument substitution** once on
- *  the **host**, and decides whether per-iteration **prompt expansion** is
- *  needed. The returned owner is what the **iteration loop** calls each
- *  iteration. */
 export async function preparePromptPipeline(
   input: PromptPipelineInput,
 ): Promise<PreparedPromptPipeline> {
@@ -134,8 +120,6 @@ async function resolveSource(
 
 const KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const PLACEHOLDER_RE = /\{\{([A-Za-z_][A-Za-z0-9_]*)\}\}/g;
-// No escape mechanism for literal backticks — the syntax is meant for short
-// fetches (`gh issue view 42`, `git log -1`).
 const SHELL_EXPRESSION_RE = /!`([^`]*)`/g;
 const HAS_SHELL_EXPR_RE = /!`[^`]*`/;
 
@@ -188,8 +172,6 @@ function substituteArgs(input: SubstituteInput): SubstituteResult {
     const list = Array.from(missing)
       .map((k) => `{{${k}}}`)
       .join(", ");
-    // TODO(#15): interactive() will prompt the user to fill in missing values
-    // instead of throwing.
     throw new Error(
       `Prompt template references unknown placeholder${missing.size > 1 ? "s" : ""
       }: ${list}. Add to promptArgs or remove from the template.`,
@@ -200,10 +182,8 @@ function substituteArgs(input: SubstituteInput): SubstituteResult {
   return { text: substituted, unusedKeys };
 }
 
-/** Trailing newlines on each command's stdout are stripped (POSIX `$(cmd)`
- *  semantics). All shell expressions in a single prompt run in parallel; a
- *  non-zero exit — or a thrown rejection from `exec` (e.g. sandbox died) —
- *  rejects with the offending command. */
+/** Trailing newlines stripped (POSIX $(cmd) semantics). Shell expressions
+ *  run in parallel. */
 async function expandShellExpressions(
   text: string,
   exec: SandboxExec,

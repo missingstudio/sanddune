@@ -6,11 +6,9 @@ export interface BindMount {
   readonly sandboxPath: string;
 }
 
-/** When `<worktreePath>/.git` is a pointer file (git worktree, not a regular
- *  checkout), the pointer references the parent `.git` at a host path that
- *  doesn't exist inside the sandbox. Bind-mounting the parent at its host
- *  path makes the pointer resolve. Per ADR-0006. Returns null when the
- *  pointer is absent, malformed, or `.git` is a directory. */
+/** Worktree's `.git` is a pointer file referencing the parent `.git` at a
+ *  host path that wouldn't exist inside the sandbox without this mount.
+ *  Returns null for regular checkouts (`.git` is a directory). */
 export async function resolveParentGitMount(
   worktreePath: string,
 ): Promise<BindMount | null> {
@@ -35,8 +33,7 @@ export async function resolveParentGitMount(
   const gitdirPath = match[1];
   if (typeof gitdirPath !== "string") return null;
 
-  // gitdirPath is e.g. /repo/.git/worktrees/<id>. Walk up until we hit the
-  // segment named `.git` — that's the parent .git directory we need to mount.
+  // gitdirPath is /repo/.git/worktrees/<id>; walk up to the `.git` segment.
   let dir = gitdirPath;
   while (basename(dir) !== ".git" && dir !== "/" && dir.length > 0) {
     const next = dirname(dir);
@@ -48,8 +45,6 @@ export async function resolveParentGitMount(
   return { hostPath: dir, sandboxPath: dir };
 }
 
-/** Lowercased and sanitized to `[a-z0-9_.-]` so any repo dir name produces
- *  a valid tag; falls back to `sanddune:local`. */
 export function defaultImageName(hostRepoPath: string): string {
   const dirName =
     hostRepoPath

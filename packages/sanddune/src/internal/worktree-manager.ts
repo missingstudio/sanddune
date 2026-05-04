@@ -168,19 +168,13 @@ export async function createBranchWorktree(
   };
 }
 
-// Branch names may contain `/`, which is unsafe as a single directory
-// segment. Replace `/` with `-` so `agent/foo` maps to a flat directory
-// `agent-foo` under `.sanddune/worktrees/`. Other ref-name characters
-// (`.`, `_`, alphanumerics, `-`) are already path-safe.
+// `agent/foo` → `agent-foo` so it fits a single directory segment.
 function sanitizeBranchForPath(branch: string): string {
   return branch.replace(/\//g, "-");
 }
 
-// `git worktree list --porcelain` reports paths with symlinks resolved
-// (e.g. macOS `/var/...` reported as `/private/var/...`). Our worktree path
-// is built with `path.join` from `options.cwd`, which preserves whatever
-// the caller passed in. Compare via `realpath` so a symlink layer doesn't
-// trick us into thinking the branch is checked out elsewhere.
+// `git worktree list --porcelain` resolves symlinks (macOS `/var/...` →
+// `/private/var/...`), but our paths are built via `path.join` and don't.
 async function samePath(a: string, b: string): Promise<boolean> {
   if (a === b) return true;
   try {
@@ -202,8 +196,7 @@ async function pathExists(path: string): Promise<boolean> {
 }
 
 async function gitBranchExists(cwd: string, branch: string): Promise<boolean> {
-  // `git show-ref --verify` *uses* exit codes to signal "branch missing", so
-  // bypass `runGit`'s throw-on-nonzero and read the exit code directly.
+  // Exit code carries the answer — bypass runGit's throw-on-nonzero.
   const result = await spawnHost(
     "git",
     ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`],
@@ -251,15 +244,12 @@ async function gitStatusIsDirty(cwd: string): Promise<boolean> {
   return result.stdout.trim().length > 0;
 }
 
-/** Best-effort `git worktree prune` to evict admin entries for worktree
- *  directories that no longer exist on disk (e.g. a previous run was killed
- *  before `close()` could remove its worktree). Swallows all errors —
- *  callers run this as a hygiene step before creating a new worktree, and
- *  a prune failure should not block creation. */
+/** Best-effort hygiene; swallows errors so prune failures don't block
+ *  worktree creation. */
 export async function pruneStaleWorktrees(cwd: string): Promise<void> {
   try {
     await runGit(cwd, ["worktree", "prune"]);
   } catch {
-    // Intentionally swallowed — this is hygiene, not correctness.
+    // hygiene, not correctness
   }
 }

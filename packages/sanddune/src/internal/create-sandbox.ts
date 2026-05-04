@@ -32,38 +32,22 @@ export interface CreateSandboxFromWorktreeInput {
   readonly provider: BindMountSandboxProvider;
   readonly hostRepoPath: string;
   readonly strategy: WorktreeStrategy;
-  /** Resolved env (per ADR-0012); already validated for agent/sandbox
-   *  overlap and merged with the caller's `createSandbox({ env })`. */
   readonly env: Readonly<Record<string, string>>;
   readonly hooks: SandboxHooks | undefined;
   readonly copyToWorktree: readonly string[] | undefined;
   readonly timeouts: Timeouts | undefined;
   readonly logging: LoggingOption | undefined;
-  /** When `true`, `close()` tears down the worktree alongside the container.
-   *  Set by the top-level `createSandbox()` (ownership-follows-creation,
-   *  ADR-0010); `wt.createSandbox()` would pass `false` so the parent
-   *  `Worktree` retains worktree-teardown responsibility. */
+  /** When true, close() tears down the worktree alongside the container.
+   *  When false, the parent Worktree owns teardown. */
   readonly ownsWorktree: boolean;
   readonly seams?: CreateSandboxSeams;
 }
 
 export interface CreateSandboxSeams {
-  /** Inject a fake `AgentInvoker` for tests — same seam as `runProgram`. */
   readonly agentInvokerLayer?: Layer.Layer<AgentInvoker, never, never>;
 }
 
-/** Layered creator shared by top-level `createSandbox()` and (next slice)
- *  `wt.createSandbox()`. Runs the lifecycle once at creation time:
- *
- *      copyToWorktree → host.onWorktreeReady → sandbox created →
- *      host.onSandboxReady ∥ sandbox.onSandboxReady
- *
- *  After this returns, hooks do **not** re-fire on `sandbox.run()` — those
- *  are inherited at construction per the brief.
- *
- *  Throws on lifecycle failure; on success returns a live `Sandbox` whose
- *  `close()` is responsible for teardown (and, when `ownsWorktree`, the
- *  worktree). */
+/** Hooks fire once here; sandbox.run() does not re-fire them. */
 export async function createSandboxFromWorktree(
   input: CreateSandboxFromWorktreeInput,
 ): Promise<Sandbox> {
@@ -98,10 +82,7 @@ export async function createSandboxFromWorktree(
       signal: undefined,
     });
   } catch (err) {
-    // Setup failed past worktree creation but possibly before the sandbox
-    // was ready — close any partial container, then unwind the worktree
-    // strategy if we own it. Each step swallows so the original error
-    // surfaces.
+    // Each teardown step swallows so the original error surfaces.
     await closeHandleSafely(handle);
     if (input.ownsWorktree) {
       try {
@@ -136,7 +117,7 @@ interface MakeSandboxHandleInput {
   readonly hostRepoPath: string;
   readonly baseEnv: Readonly<Record<string, string>>;
   readonly ownsWorktree: boolean;
-  /** Default `logging` configuration — per-`run()` `logging` overrides. */
+  /** Per-run() logging overrides this default. */
   readonly creationLogging: LoggingOption | undefined;
   readonly seams?: CreateSandboxSeams;
 }
@@ -151,10 +132,7 @@ function makeSandboxHandle(input: MakeSandboxHandleInput): Sandbox {
     if (closed) {
       throw new Error("sandbox.run() called after close()");
     }
-    // Belt-and-braces — type-level rejection prevents this in TS, but
-    // JS callers (or `as never` escapes) could still pass it. Per the
-    // brief ("rejected at type level on `SandboxRunOptions` and at runtime
-    // on `sandbox.run()`").
+    // Belt-and-braces — TS already rejects this at the type level.
     if ((options as { resumeSession?: unknown }).resumeSession !== undefined) {
       throw new Error(
         "sandbox.run() does not accept resumeSession — agent session resume is a fresh-sandbox concern (see CONTEXT.md).",
@@ -225,8 +203,6 @@ function makeSandboxHandle(input: MakeSandboxHandleInput): Sandbox {
     await closeHandleSafely(handle);
 
     if (!input.ownsWorktree) {
-      // wt.createSandbox provenance: worktree teardown belongs to the
-      // parent Worktree, not us (ADR-0010 ownership-follows-creation).
       return { worktreePreserved: false };
     }
 
@@ -277,8 +253,6 @@ function makeSandboxHandle(input: MakeSandboxHandleInput): Sandbox {
     const command = buildAgentInteractiveCommand({
       agent,
       prompt,
-      // Long-lived sandbox containers are explicitly trusted at construction
-      // time — same default the top-level interactive() bind-mount path uses.
       skipPermissions: true,
     });
 

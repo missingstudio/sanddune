@@ -1,19 +1,11 @@
 import type { AgentStreamEvent } from "../core";
 import type { RunSession } from "./run-session";
 
-/** Minimal sink for **terminal mode** rendering — defaults to
- *  `process.stdout.write`. Tests substitute a string-collecting writer to
- *  assert against rendered output. */
 export type TerminalWriter = (chunk: string) => void;
 
 export interface OpenStdoutRunSessionInput {
   readonly name?: string;
-  /** Test seam — when omitted, writes go to `process.stdout`. */
   readonly writer?: TerminalWriter;
-  /** Test seam — when omitted, the renderer asks the real `process.stdout`
-   *  whether it's a TTY. Spinners / interactive redraws are emitted only
-   *  when this is true; otherwise rendering is line-oriented (suitable for
-   *  CI logs and snapshot tests). */
   readonly isTTY?: boolean;
 }
 
@@ -31,10 +23,6 @@ const STYLES = {
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const SPINNER_INTERVAL_MS = 80;
 
-/** Renders a **terminal mode** session. Spinners run only when `isTTY` is
- *  true; the line-mode fallback emits one line per state change so CI logs
- *  and tests stay parseable. `logFilePath` is always `undefined`, matching
- *  the contract that the run log file is the file-mode artifact. */
 export async function openStdoutRunSession(
   input: OpenStdoutRunSessionInput = {},
 ): Promise<RunSession> {
@@ -71,7 +59,6 @@ export async function openStdoutRunSession(
     writer(`${prefix}${line}\n`);
   };
 
-  // Header.
   writeLine(`${STYLES.cyan}▶${RESET} ${STYLES.bold}sanddune run starting${RESET}`);
 
   let ended = false;
@@ -129,7 +116,6 @@ function renderAgentEvent(
   if (event.type === "toolCall") {
     writeLine(`  ${STYLES.dim}→ tool: ${event.name}${RESET}`);
   }
-  // Text events are intentionally silent in terminal mode — the agent's
-  // running narration would flood the screen mid-spinner. Summaries land via
-  // iterationEnded / endOk.
+  // Text events are dropped on purpose — agent narration would flood the
+  // screen mid-spinner.
 }

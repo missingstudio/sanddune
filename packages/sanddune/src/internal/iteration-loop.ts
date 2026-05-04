@@ -9,48 +9,22 @@ import { gitNewCommits } from "./git";
 import type { IterationLogger } from "./run-session";
 
 export interface IterationLoopInput {
-  /** Called once per iteration to obtain the **prompt** text the **agent**
-   *  will see. Owned by the **prompt pipeline**; the loop neither inspects
-   *  nor caches the result. For inline prompts and shell-expression-free
-   *  templates the closure is a no-op string return; for templates with
-   *  shell expressions it evaluates them in the live **sandbox**. */
   readonly getPromptForIteration: () => Promise<string>;
-  /** Narrow per-iteration log surface — the loop does not own the **run
-   *  session** lifecycle; it only emits `iterationStarted` /
-   *  `iterationEnded`. Provided by `RunSession.logger`. */
   readonly logger: IterationLogger;
   readonly cwd: string;
   readonly beforeSha: string;
   readonly maxIterations: number;
-  /** First match across iterations wins; empty array disables detection. */
+  /** First match wins; empty array disables detection. */
   readonly completionSignals: readonly string[];
-  /** Per-iteration idle timeout. Forwarded to the **agent invoker**, which
-   *  owns the watchdog and synthesizes an `AgentIdleTimeoutError` abort on
-   *  expiry (ADR-0011). */
   readonly idleTimeoutSeconds: number;
-  /** Caller-supplied abort. Checked at iteration boundaries and forwarded
-   *  to the **agent invoker**, which composes it with its internal idle
-   *  signal so a mid-iteration abort kills the agent subprocess (via
-   *  `spawnHost` SIGTERM) and rejects with `signal.reason` verbatim
-   *  (ADR-0004 / ADR-0011). */
   readonly signal?: AbortSignal;
-  /** **Agent session** id to resume. Forwarded to the **agent invoker** on
-   *  iteration 1 only; subsequent iterations always start fresh per the
-   *  brief (slice #14 — long-lived sandboxes don't chain Claude session
-   *  state through `--resume`). */
+  /** Forwarded to the agent invoker on iteration 1 only. */
   readonly resumeSessionId?: string;
-  /** Best-effort capture closure invoked after each iteration whose invoke
-   *  returned a `sessionId`. Resolves to `{ hostPath, usage? }` on success,
-   *  `undefined` if capture failed (the closure handles its own logging).
-   *  Omitted when the agent provider has no `sessionCapture` capability or
-   *  capture is disabled — in that case the loop never asks. */
+  /** Resolves to undefined when capture fails (closure logs its own errors). */
   readonly captureSession?: (input: {
     readonly iteration: number;
     readonly sessionId: string;
   }) => Promise<{ readonly hostPath: string; readonly usage?: IterationUsage } | undefined>;
-  /** Forwarded to the **agent invoker**'s `onEvent` so the production path
-   *  fans events into the **run log** (and the user's `onAgentStreamEvent`
-   *  callback) in near-real-time, not at iteration boundaries. */
   readonly onEvent?: (event: AgentStreamEvent) => void;
 }
 
@@ -169,9 +143,6 @@ const fromPromise = <T>(thunk: () => Promise<T>) =>
     catch: (e) => (e instanceof Error ? e : new Error(String(e))),
   });
 
-/** Returns the abort reason as an `Error` if the signal has aborted, else
- *  `undefined`. Non-Error reasons are wrapped so the loop can still surface
- *  via `Effect.fail`; identity is preserved for the common Error case. */
 function abortReason(signal: AbortSignal | undefined): Error | undefined {
   if (!signal?.aborted) return undefined;
   const reason = signal.reason;

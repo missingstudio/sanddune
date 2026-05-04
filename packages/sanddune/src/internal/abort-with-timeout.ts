@@ -1,11 +1,6 @@
-/** Composes a caller's `AbortSignal` with a per-step timeout into a single
- *  signal. Aborts when either fires; the timeout's reason is the typed error
- *  produced by `timeoutErrorFactory` so callers can distinguish a caller
- *  abort from a timeout via `signal.reason instanceof <YourTimeoutError>`.
- *
- *  The returned `cleanup()` must be called in a `finally` to drop the timer
- *  and the listener on the caller signal — otherwise long-lived caller
- *  signals leak listeners across many sequential hooks. */
+/** cleanup() must be called in a finally to drop the timer and the
+ *  listener on the caller signal — otherwise long-lived caller signals
+ *  leak listeners across many sequential hooks. */
 export interface ComposedSignal {
   readonly signal: AbortSignal;
   cleanup(): void;

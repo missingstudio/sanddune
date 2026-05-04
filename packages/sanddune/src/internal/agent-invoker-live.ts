@@ -75,10 +75,8 @@ interface IdleTimer {
   dispose(): void;
 }
 
-/** Synthesizes an abort whose reason is `AgentIdleTimeoutError` after
- *  `idleTimeoutSeconds` of silence. Reset by the invoker on each parsed
- *  **agent stream event**. A non-positive timeout disables the watchdog —
- *  the returned signal never aborts on its own. */
+/** Aborts with AgentIdleTimeoutError after idleTimeoutSeconds of silence.
+ *  Non-positive timeout disables the watchdog. */
 function startIdleTimer(params: {
   readonly idleTimeoutSeconds: number;
   readonly iteration: number;
