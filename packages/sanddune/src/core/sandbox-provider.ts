@@ -28,12 +28,6 @@ export interface ExecInteractiveResult {
 
 export type SandboxKind = "bind-mount" | "isolated" | "no-sandbox";
 
-export interface SandboxProvider<K extends SandboxKind = SandboxKind> {
-  readonly kind: K;
-  readonly name: string;
-  readonly env?: Readonly<Record<string, string>>;
-}
-
 export interface BindMountCreateOptions {
   readonly worktreePath: string;
   readonly hostRepoPath: string;
@@ -54,7 +48,10 @@ export interface BindMountSandboxHandle {
   close(): Promise<void>;
 }
 
-export interface BindMountSandboxProvider extends SandboxProvider<"bind-mount"> {
+export interface BindMountSandboxProvider {
+  readonly kind: "bind-mount";
+  readonly name: string;
+  readonly env?: Readonly<Record<string, string>>;
   readonly create: (
     options: BindMountCreateOptions,
   ) => Promise<BindMountSandboxHandle>;
@@ -69,8 +66,27 @@ export interface IsolatedSandboxHandle {
   close(): Promise<void>;
 }
 
-export type IsolatedSandboxProvider = SandboxProvider<"isolated">;
-export type NoSandboxProvider = SandboxProvider<"no-sandbox">;
+export interface IsolatedSandboxProvider {
+  readonly kind: "isolated";
+  readonly name: string;
+  readonly env?: Readonly<Record<string, string>>;
+}
+
+export interface NoSandboxProvider {
+  readonly kind: "no-sandbox";
+  readonly name: string;
+  readonly env?: Readonly<Record<string, string>>;
+}
+
+/** The umbrella type for everything a sandbox provider can be. Discriminated
+ *  by `kind`: narrowing on `kind === "bind-mount"` gives access to `create()`
+ *  on the **bind-mount sandbox provider** arm. The variant interfaces stay
+ *  exported for adapter authors who want to name the specific shape they
+ *  return. */
+export type SandboxProvider =
+  | BindMountSandboxProvider
+  | IsolatedSandboxProvider
+  | NoSandboxProvider;
 
 export type RunSandboxProvider =
   | BindMountSandboxProvider

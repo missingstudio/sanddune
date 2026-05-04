@@ -29,9 +29,7 @@ import { createWorktreeStrategy } from "./worktree-strategy";
 /** Set to 1 so existing single-iteration callers don't get a cost multiplier
  *  — multi-iteration is opt-in via `maxIterations`. */
 const DEFAULT_MAX_ITERATIONS = 1;
-/** Per CONTEXT.md. */
 const DEFAULT_COMPLETION_SIGNAL = "<promise>COMPLETE</promise>";
-/** Per ADR-0011 / brief. */
 const DEFAULT_IDLE_TIMEOUT_SECONDS = 600;
 
 export interface RunProgramTestSeams {
@@ -197,8 +195,8 @@ export async function runProgram(
         ...(options.signal !== undefined && { signal: options.signal }),
         ...(options.resumeSession !== undefined &&
           options.agent.sessionCapture !== undefined && {
-            resumeSessionId: options.resumeSession,
-          }),
+          resumeSessionId: options.resumeSession,
+        }),
         ...(captureSession !== undefined && { captureSession }),
         onEvent: session.recordAgentEvent,
       }).pipe(Effect.provide(agentInvokerLayer)),
@@ -236,8 +234,7 @@ export async function runProgram(
       preservedPath = r.preservedPath;
     } catch (e) {
       process.stderr.write(
-        `sanddune: worktree teardown failed: ${
-          e instanceof Error ? e.message : String(e)
+        `sanddune: worktree teardown failed: ${e instanceof Error ? e.message : String(e)
         }\n`,
       );
     }
@@ -260,8 +257,7 @@ async function closeHandleSafely(
     await handle.close();
   } catch (closeError) {
     process.stderr.write(
-      `sanddune: sandbox teardown failed: ${
-        closeError instanceof Error ? closeError.message : String(closeError)
+      `sanddune: sandbox teardown failed: ${closeError instanceof Error ? closeError.message : String(closeError)
       }\n`,
     );
   }

@@ -36,7 +36,7 @@ A TypeScript library for orchestrating AI coding agents in isolated sandboxes.
 | Terminal mode (`logging: { type: "stdout" }`) | ✅ shipped | Spinners + styled status lines + run summary                                 |
 | `onAgentStreamEvent` callback        | ✅ shipped | Sync, fire-and-forget; errors swallowed (file mode only)                         |
 | `IterationResult.usage`              | ✅ shipped | Raw token counts parsed from captured Claude session JSONL (per ADR-0005b)       |
-| Custom bind-mount provider           | ✅ shipped | Build your own by constructing a `BindMountSandboxProvider` |
+| Custom bind-mount provider           | ✅ shipped | Build your own by constructing a `SandboxProvider` with `kind: "bind-mount"` |
 | `createSandbox()`                   | ✅ shipped | Long-lived reusable sandbox on a single branch; multiple `sandbox.run()` calls reuse the container; `await using` auto-disposes |
 | `createWorktree()`                  | ✅ shipped | Long-lived worktree as an independent lifecycle; `wt.run()` / `wt.createSandbox()` / `wt.interactive()` layer on top with split-close ownership (ADR-0010) |
 | `interactive()`                     | ✅ shipped | Launches the agent's TUI inside a sandbox or directly on the host; accepts `bind-mount`, `isolated`, or `no-sandbox` providers; uses the provider's default branch strategy |
@@ -154,15 +154,26 @@ const result = await run({
 
 #### Currently accepted
 
-| Option           | Type                            | Behavior                                                      |
-| ---------------- | ------------------------------- | ------------------------------------------------------------- |
-| `agent`          | `AgentProvider`                 | **Required.** Today: `claudeCode(model, { env? })`             |
-| `sandbox`        | `BindMountSandboxProvider`      | **Required.** Today: `docker()` or your own bind-mount provider |
-| `prompt`         | `string`                        | Inline prompt; passed to the agent verbatim (ADR-0008)         |
-| `promptFile`     | `string`                        | Path to a prompt template file; relative paths resolve from `process.cwd()` |
-| `cwd`            | `string`                        | Host repo dir; relative paths resolve from `process.cwd()`     |
-| `branchStrategy` | `BranchStrategy`                | `head` (default) / `merge-to-head` / `branch`                  |
-| `env`            | `Record<string, string>`        | Call-site env override; highest precedence (ADR-0012)          |
+| Option               | Type                                | Behavior                                                                                                                                |
+| -------------------- | ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `agent`              | `AgentProvider`                     | **Required.** Today: `claudeCode(model, { env?, captureSessions? })`                                                                    |
+| `sandbox`            | `SandboxProvider`                   | **Required.** Today: `docker()` or your own bind-mount provider                                                                         |
+| `prompt`             | `string`                            | Inline prompt; passed to the agent verbatim (ADR-0008)                                                                                  |
+| `promptFile`         | `string`                            | Path to a prompt template file; relative paths resolve from `process.cwd()`                                                             |
+| `promptArgs`         | `Record<string, string \| number>`  | Values for `{{KEY}}` placeholders in `promptFile`; rejected when combined with inline `prompt`                                          |
+| `cwd`                | `string`                            | Host repo dir; relative paths resolve from `process.cwd()`. Defaults to `process.cwd()`                                                 |
+| `branchStrategy`     | `BranchStrategy`                    | `head` (default) / `merge-to-head` / `branch`                                                                                           |
+| `env`                | `Record<string, string>`            | Call-site env override; highest precedence (ADR-0012)                                                                                   |
+| `name`               | `string`                            | Display name prefixed in log output and terminal-mode rendering; cosmetic only                                                          |
+| `maxIterations`      | `number`                            | Default `1`. The iteration loop runs at most this many times                                                                            |
+| `completionSignal`   | `string \| string[]`                | Default `<promise>COMPLETE</promise>`. First match wins; surfaced as `RunResult.completionSignal`                                       |
+| `idleTimeoutSeconds` | `number`                            | Default `600`. Resets on every agent stream event; on expiry the run rejects with `AgentIdleTimeoutError` (ADR-0011)                    |
+| `signal`             | `AbortSignal`                       | When fired mid-iteration, the agent subprocess is killed and `run()` rejects with `signal.reason` verbatim (ADR-0011)                   |
+| `resumeSession`      | `string`                            | Continue a prior Claude Code session by id. Validated **before** sandbox creation; rejected when combined with `maxIterations > 1`      |
+| `hooks`              | `SandboxHooks`                      | Lifecycle hooks; see below                                                                                                              |
+| `copyToWorktree`     | `string[]`                          | Host items copied into the worktree before hooks fire; rejected with `branchStrategy: { type: "head" }`                                 |
+| `timeouts`           | `Timeouts`                          | Currently only `copyToWorktreeMs` (default `60_000`) is wired                                                                           |
+| `logging`            | `LoggingOption`                     | `{ type: "file", path?, onAgentStreamEvent? }` (default) or `{ type: "stdout" }` for terminal mode                                      |
 
 Exactly one of `prompt` / `promptFile` is required. On the template path, sanddune performs host-side `{{KEY}}` substitution before the agent runs: every `{{KEY}}` placeholder is replaced with its value from `promptArgs`, plus the built-in arguments `{{SOURCE_BRANCH}}` and `{{TARGET_BRANCH}}` (resolved from the active branch strategy). Passing `SOURCE_BRANCH` or `TARGET_BRANCH` in `promptArgs` throws — built-ins cannot be overridden. A `{{KEY}}` with no matching arg throws naming the key; unused `promptArgs` keys log a warning. Inline `prompt` skips substitution entirely (per ADR-0008), and combining `prompt` with `promptArgs` throws. Templates can also embed `` !`command` `` shell expressions, evaluated in parallel inside the sandbox before each iteration; substitution runs first, so `{{KEY}}` placeholders inside shell expressions are valid (e.g. `` !`gh issue view {{ISSUE}}` ``). All of this is owned by the `preparePromptPipeline()` module, exported from `@missingstudio/sanddune` for callers who want to reuse the host-side validation outside `run()`.
 
@@ -195,7 +206,7 @@ await run({
 
 #### Accepted by the type but not yet wired
 
-`timeouts.idleSeconds`, `timeouts.totalSeconds`. Silently ignored. Don't depend on them.
+`timeouts.idleSeconds` and `timeouts.totalSeconds` (the nested fields on the `Timeouts` interface) are silently ignored. The live idle knob is `idleTimeoutSeconds` at the top level of `RunOptions` — see the table above. There is no top-level total-run timeout; if you need one, wrap the call with an `AbortController`.
 
 #### `logging`
 
@@ -247,6 +258,152 @@ interface IterationUsage {
   cacheReadInputTokens?: number;
 }
 ```
+
+### `createSandbox(options)` — long-lived reusable sandbox
+
+Use `createSandbox()` when you need to run multiple agents (or multiple rounds of the same agent) inside one container on the same branch. The container starts once; each `sandbox.run()` reuses it. Hooks fire **once** at creation, not per call.
+
+```typescript
+import { createSandbox, claudeCode } from "@missingstudio/sanddune";
+import { docker } from "@missingstudio/sanddune/sandboxes/docker";
+
+await using sandbox = await createSandbox({
+  agent: claudeCode("claude-opus-4-7"),
+  sandbox: docker(),
+  branch: "agent/fix-42",
+  hooks: { sandbox: { onSandboxReady: [{ command: "bun install" }] } },
+});
+
+// Implement
+await sandbox.run({ prompt: "Fix issue #42.", maxIterations: 5 });
+
+// Review on the same branch and same container — `bun install` doesn't re-run.
+await sandbox.run({ prompt: "Review the changes and fix anything off." });
+```
+
+`await using` calls `close()` automatically on block exit; if the worktree is dirty it's preserved on disk and surfaced as `CloseResult.preservedWorktreePath`. Per [ADR-0010](docs/adr/0010-layered-sandbox-creation.md), ownership-follows-creation: a `Sandbox` returned by top-level `createSandbox()` owns its worktree, so `close()` tears down both container and worktree.
+
+`createSandbox()` is single-branch by construction — it accepts `branch: string`, not the full `BranchStrategy` (per [ADR-0009](docs/adr/0009-branch-strategy-per-call.md)). `merge-to-head` would conflict with cross-call reuse, and `head` would conflict with having a stable worktree.
+
+#### `CreateSandboxOptions`
+
+| Option           | Type                       | Behavior                                                                                |
+| ---------------- | -------------------------- | --------------------------------------------------------------------------------------- |
+| `agent`          | `AgentProvider`            | **Required.** Used by every `sandbox.run()` call                                        |
+| `sandbox`        | `SandboxProvider`          | **Required.** Today: `docker()` or your own bind-mount provider                         |
+| `branch`         | `string`                   | **Required.** Explicit branch the worktree checks out                                   |
+| `cwd`            | `string`                   | Host repo dir; relative paths resolve from `process.cwd()`. Defaults to `process.cwd()` |
+| `env`            | `Record<string, string>`   | Call-site env override (ADR-0012)                                                       |
+| `hooks`          | `SandboxHooks`             | Run **once** at creation — not per `sandbox.run()` call                                 |
+| `copyToWorktree` | `string[]`                 | Host items copied into the worktree at creation time                                    |
+| `timeouts`       | `Timeouts`                 | Currently only `copyToWorktreeMs` is wired                                              |
+| `logging`        | `LoggingOption`            | Default for `sandbox.run()` calls; per-call `logging` overrides                         |
+
+#### `Sandbox`
+
+| Member                  | Type                                              | Notes                                                                            |
+| ----------------------- | ------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `branch`                | `string`                                          | The branch the sandbox is on                                                     |
+| `worktreePath`          | `string`                                          | Host path to the worktree                                                        |
+| `run(options)`          | `(SandboxRunOptions) => Promise<RunResult>`       | Invoke an agent inside the existing sandbox                                      |
+| `interactive(options)`  | `(SandboxInteractiveOptions) => Promise<void>`    | Throws `NotImplementedError` today                                               |
+| `close()`               | `() => Promise<CloseResult>`                      | Tears down the container; tears down the worktree iff the `Sandbox` owns it (ADR-0010) |
+| `[Symbol.asyncDispose]` | `() => Promise<void>`                             | Auto teardown via `await using`                                                  |
+
+#### `SandboxRunOptions`
+
+Equals top-level `RunOptions` minus the fields fixed at creation time (`agent`, `sandbox`, `cwd`, `branchStrategy`, `hooks`, `copyToWorktree`, `timeouts`, `name`) and minus `resumeSession` (rejected at the type level — Claude session resume is a fresh-sandbox concern only).
+
+| Option               | Type                               | Behavior                                                                              |
+| -------------------- | ---------------------------------- | ------------------------------------------------------------------------------------- |
+| `prompt`             | `string`                           | Inline prompt (mutually exclusive with `promptFile`)                                  |
+| `promptFile`         | `string`                           | Path to a prompt template                                                             |
+| `promptArgs`         | `Record<string, string \| number>` | Values for `{{KEY}}` placeholders                                                     |
+| `maxIterations`      | `number`                           | Default `1`. Each call has its own independent iteration loop (ADR-0011)              |
+| `completionSignal`   | `string \| string[]`               | Default `<promise>COMPLETE</promise>`                                                 |
+| `idleTimeoutSeconds` | `number`                           | Default `600`                                                                         |
+| `env`                | `Record<string, string>`           | Per-call env override; merged with the creation-time env                              |
+| `logging`            | `LoggingOption`                    | Overrides the creation-time default                                                   |
+| `signal`             | `AbortSignal`                      | Aborting kills the in-flight agent; the sandbox stays usable for a re-run (ADR-0011)  |
+
+#### `CloseResult`
+
+| Field                   | Type      | Notes                                                                                                                                              |
+| ----------------------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `worktreePreserved`     | `boolean` | `true` when the worktree was dirty at close                                                                                                        |
+| `preservedWorktreePath` | `string`  | Host path to the preserved worktree; set only when `worktreePreserved` is `true`. Always `undefined` for a `Sandbox` returned by `wt.createSandbox()` (worktree ownership lives with the parent `Worktree`, ADR-0010) |
+
+### `createWorktree(options)` — independent worktree lifecycle
+
+Use `createWorktree()` when the worktree should outlive any single sandbox or interactive session — e.g. start an interactive session to explore, then hand the same worktree to an AFK agent. Only `branch` and `merge-to-head` strategies are accepted; `head` is a compile-time error (no worktree to create).
+
+```typescript
+import { createWorktree, claudeCode } from "@missingstudio/sanddune";
+import { docker } from "@missingstudio/sanddune/sandboxes/docker";
+
+await using wt = await createWorktree({
+  branchStrategy: { type: "branch", branch: "agent/explore" },
+  copyToWorktree: ["node_modules"],
+});
+
+// Interactive on the host (defaults to noSandbox()) — same worktree.
+await wt.interactive({ agent: claudeCode("claude-opus-4-7") });
+
+// AFK in Docker — same worktree, fresh container.
+const result = await wt.run({
+  agent: claudeCode("claude-opus-4-7"),
+  sandbox: docker(),
+  prompt: "Implement what we discussed.",
+  maxIterations: 3,
+});
+
+// Or layer a long-lived sandbox on top — same worktree.
+await using sandbox = await wt.createSandbox({
+  agent: claudeCode("claude-opus-4-7"),
+  sandbox: docker(),
+});
+await sandbox.run({ prompt: "..." });
+```
+
+**Split ownership (ADR-0010).** A `Sandbox` returned by `wt.createSandbox()` does not own the worktree — `sandbox.close()` tears down the container only; `wt.close()` is responsible for the worktree. Top-level `createSandbox()` owns both. Same `Sandbox` type either way; the `close()` semantics differ by provenance.
+
+#### `CreateWorktreeOptions`
+
+| Option           | Type                    | Behavior                                                                                                     |
+| ---------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `branchStrategy` | `NonHeadBranchStrategy` | **Required.** `{ type: "branch", branch }` or `{ type: "merge-to-head" }`. `head` rejected at the type level |
+| `cwd`            | `string`                | Host repo dir; relative paths resolve from `process.cwd()`                                                   |
+| `copyToWorktree` | `string[]`              | Host items copied into the worktree at creation time                                                         |
+| `timeouts`       | `Timeouts`              | Currently only `copyToWorktreeMs` is wired                                                                   |
+
+`hooks` are **not** accepted on `CreateWorktreeOptions` — they are passed per-method to `wt.run()` / `wt.interactive()` / `wt.createSandbox()`.
+
+#### `Worktree`
+
+| Member                   | Type                                                          | Notes                                                  |
+| ------------------------ | ------------------------------------------------------------- | ------------------------------------------------------ |
+| `worktreePath`           | `string`                                                      | Host path to the worktree                              |
+| `branch`                 | `string`                                                      | The branch the worktree is on                          |
+| `branchStrategy`         | `NonHeadBranchStrategy`                                       | The strategy passed at creation                        |
+| `run(options)`           | `(WorktreeRunOptions) => Promise<RunResult>`                  | One-shot AFK agent on this worktree (sandbox required) |
+| `interactive(options)`   | `(WorktreeInteractiveOptions) => Promise<void>`               | TUI on this worktree; sandbox defaults to `noSandbox()` |
+| `createSandbox(options)` | `(WorktreeCreateSandboxOptions) => Promise<Sandbox>`          | Long-lived sandbox over this worktree                  |
+| `close()`                | `() => Promise<CloseResult>`                                  | Tears down only the worktree (ADR-0010)                |
+| `[Symbol.asyncDispose]`  | `() => Promise<void>`                                         | Auto cleanup via `await using`                         |
+
+`copyToWorktree` set at `createWorktree()` time is the fallback when a method call omits it; passing it on a `wt.*` method overrides for that call. `wt.run()` does **not** accept `resumeSession` — session resume is a top-level `run()` concern only.
+
+#### `WorktreeRunOptions`
+
+Same shape as top-level `RunOptions` minus `cwd` (inherited from the worktree), `branchStrategy` (the worktree determines), `name`, and `resumeSession`. `agent` and `sandbox` are required per call.
+
+#### `WorktreeInteractiveOptions`
+
+Same shape as top-level `interactive()` minus `cwd` and `name`. `sandbox` is **optional** — defaults to `noSandbox()` so the agent runs directly on the host inside the worktree.
+
+#### `WorktreeCreateSandboxOptions`
+
+Same shape as top-level `createSandbox()` minus `branch` (the worktree determines) and `cwd`. `agent` and `sandbox` are required.
 
 ### Environment resolution
 
@@ -336,7 +493,7 @@ await wt.interactive({ agent: claudeCode("claude-opus-4-7") });
 | Option            | Type                            | Behavior                                                            |
 | ----------------- | ------------------------------- | ------------------------------------------------------------------- |
 | `agent`           | `AgentProvider`                 | **Required.** Must declare `buildInteractiveCommand` (claudeCode does) |
-| `sandbox`         | `InteractiveSandboxProvider`    | **Required** on `interactive()`; defaults to `noSandbox()` on `wt.interactive()` |
+| `sandbox`         | `SandboxProvider`               | **Required** on `interactive()`; defaults to `noSandbox()` on `wt.interactive()` |
 | `prompt`          | `string`                        | Optional seed prompt; passed as a positional arg to the agent       |
 | `promptFile`      | `string`                        | Optional template file; `{{KEY}}` substitution + shell expressions  |
 | `promptArgs`      | `Record<string, string\|number>`  | Values for `{{KEY}}` placeholders; only valid with `promptFile`     |
@@ -356,7 +513,7 @@ Under bind-mount and isolated providers, sanddune passes `--dangerously-skip-per
 
 ### Custom bind-mount providers
 
-If you want to wrap something other than Docker (a different container runtime, an SSH host, a local subprocess), construct a `BindMountSandboxProvider` directly:
+If you want to wrap something other than Docker (a different container runtime, an SSH host, a local subprocess), construct a `BindMountSandboxProvider` directly. `BindMountSandboxProvider` is one arm of the `SandboxProvider` discriminated union — call sites accept any `SandboxProvider`, but constructing one means picking a specific kind and supplying its contract (here: `create()`):
 
 ```typescript
 import type {
@@ -389,6 +546,19 @@ const myProvider = (): BindMountSandboxProvider => ({
 Reference implementation: [`packages/sanddune/src/sandboxes/docker.ts`](packages/sanddune/src/sandboxes/docker.ts).
 
 The isolated-provider factory is declared in the type system but not yet usable from `run()`.
+
+### Errors
+
+All errors are exported from `@missingstudio/sanddune`. They carry a stable `_tag` discriminant for matching alongside `instanceof`.
+
+| Error                        | Thrown when                                                                                                                      | Extra fields                                |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| `AgentIdleTimeoutError`      | The agent produces no stream event for `idleTimeoutSeconds`. Synthesized as the abort reason; surfaces from `run()` / `Sandbox.run()` / `Worktree.run()` (ADR-0011) | `idleTimeoutSeconds`, `iteration`          |
+| `HookTimeoutError`           | A lifecycle hook exceeds its `timeoutMs` (default `60_000`)                                                                      | `command`, `timeoutMs`                      |
+| `CopyToWorktreeTimeoutError` | A `copyToWorktree` entry exceeds `timeouts.copyToWorktreeMs` (default `60_000`)                                                  | `currentItem`, `timeoutMs`                  |
+| `NotImplementedError`        | A surface declared in the type system has no implementation yet — e.g. `podman()`, `vercel()`, `Sandbox.interactive()`           | —                                           |
+
+Lifecycle failures that don't have a dedicated error class (a hook exiting non-zero, a missing prompt arg, an `agent.env ∩ sandbox.env` overlap, etc.) are thrown as plain `Error` with a descriptive message.
 
 ## Run log
 
