@@ -1,11 +1,9 @@
 import { join, resolve as resolvePath } from "node:path";
 import {
-  preparePromptPipeline,
   type AgentProvider,
   type BindMountSandboxHandle,
   type BindMountSandboxProvider,
   type BranchStrategy,
-  type ExecResult,
   type InteractiveOptions,
   type InteractiveSandboxProvider,
   type SandboxHooks,
@@ -20,15 +18,14 @@ import {
 } from "./hook-runner";
 import { spawnHost, spawnHostInteractive } from "./host-process";
 import {
+  buildAgentInteractiveCommand,
+  resolveInteractivePrompt,
+  type InteractivePromptInput,
+} from "./interactive-shared";
+import {
   createWorktreeStrategy,
   type WorktreeStrategy,
 } from "./worktree-strategy";
-
-interface InteractivePromptInput {
-  readonly prompt?: string;
-  readonly promptFile?: string;
-  readonly promptArgs?: Readonly<Record<string, string | number>>;
-}
 
 /** Top-level `interactive()`. Owns the **worktree** lifecycle for the
  *  duration of the TUI session and tears it down on exit (ADR-0010 — top
@@ -140,7 +137,7 @@ export async function runInteractiveSession(
         signal: input.signal,
       });
 
-      const prompt = await resolvePrompt({
+      const prompt = await resolveInteractivePrompt({
         promptInput: input.promptInput,
         sourceBranch: input.strategy.sourceBranch,
         targetBranch: input.strategy.targetBranch,
@@ -167,7 +164,7 @@ export async function runInteractiveSession(
       );
 
       const worktreePath = input.strategy.worktreePath;
-      const prompt = await resolvePrompt({
+      const prompt = await resolveInteractivePrompt({
         promptInput: input.promptInput,
         sourceBranch: input.strategy.sourceBranch,
         targetBranch: input.strategy.targetBranch,
@@ -236,59 +233,6 @@ function extractPromptInput(
   }
   if (options.promptArgs !== undefined) result.promptArgs = options.promptArgs;
   return result;
-}
-
-interface ResolvePromptInput {
-  readonly promptInput: InteractivePromptInput;
-  readonly sourceBranch: string;
-  readonly targetBranch: string;
-  readonly execAdapter: (command: string) => Promise<ExecResult>;
-}
-
-async function resolvePrompt(
-  input: ResolvePromptInput,
-): Promise<string | undefined> {
-  if (
-    input.promptInput.prompt === undefined &&
-    input.promptInput.promptFile === undefined
-  ) {
-    return undefined;
-  }
-  const pipeline = await preparePromptPipeline({
-    ...(input.promptInput.prompt !== undefined && {
-      prompt: input.promptInput.prompt,
-    }),
-    ...(input.promptInput.promptFile !== undefined && {
-      promptFile: input.promptInput.promptFile,
-    }),
-    ...(input.promptInput.promptArgs !== undefined && {
-      promptArgs: input.promptInput.promptArgs,
-    }),
-    sourceBranch: input.sourceBranch,
-    targetBranch: input.targetBranch,
-  });
-  for (const key of pipeline.unusedPromptArgKeys) {
-    process.stderr.write(
-      `sanddune: warning — promptArgs.${key} was not used by the template\n`,
-    );
-  }
-  return pipeline.getPromptForIteration(input.execAdapter);
-}
-
-function buildAgentInteractiveCommand(input: {
-  readonly agent: AgentProvider;
-  readonly prompt: string | undefined;
-  readonly skipPermissions: boolean;
-}): string {
-  if (input.agent.buildInteractiveCommand === undefined) {
-    throw new Error(
-      `Agent provider "${input.agent.name}" does not support interactive() (no buildInteractiveCommand).`,
-    );
-  }
-  return input.agent.buildInteractiveCommand({
-    ...(input.prompt !== undefined && { prompt: input.prompt }),
-    skipPermissions: input.skipPermissions,
-  });
 }
 
 async function closeHandleSafely(

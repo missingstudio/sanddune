@@ -6,8 +6,12 @@ import type { RunSession } from "./run-session";
 export interface OpenFileRunSessionInput {
   readonly cwd: string;
   readonly name?: string;
+  /** Branch the run targets, when known. Used in the default log filename
+   *  (`<branch>[-<name>]-<run-id>.jsonl`) so parallel runs in the same repo
+   *  are visually distinguishable. Ignored when `path` is set. */
+  readonly branch?: string;
   /** Absolute path to write the **run log** at. When omitted, sanddune
-   *  writes to `${cwd}/.sanddune/logs/<run-id>.jsonl`. */
+   *  writes to `${cwd}/.sanddune/logs/<branch>[-<name>]-<run-id>.jsonl`. */
   readonly path?: string;
   /** Sync, fire-and-forget callback. Errors are swallowed so a broken
    *  forwarder cannot kill the run. */
@@ -20,7 +24,11 @@ export async function openFileRunSession(
   const log: RunLog =
     input.path !== undefined
       ? await openRunLogAtPath(input.path)
-      : await openRunLog(input.cwd, newRunId());
+      : await openRunLog(input.cwd, {
+          runId: newRunId(),
+          ...(input.branch !== undefined && { branch: input.branch }),
+          ...(input.name !== undefined && { name: input.name }),
+        });
 
   const prefix = input.name !== undefined ? `[${input.name}] ` : "";
   process.stdout.write(

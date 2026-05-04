@@ -110,6 +110,7 @@ export async function runProgram(
 
     session = await openRunSession({
       cwd,
+      branch: strategy.resultBranch,
       ...(options.logging !== undefined && { logging: options.logging }),
       ...(options.name !== undefined && { name: options.name }),
     });

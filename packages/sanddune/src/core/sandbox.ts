@@ -1,7 +1,7 @@
 import type { AgentProvider } from "./agent-provider";
 import type { SandboxHooks } from "./hooks";
 import type { LoggingOption } from "./logging";
-import type { PromptOption } from "./prompt";
+import type { OptionalPromptOption, PromptOption } from "./prompt";
 import type {
   CreateSandboxProvider,
 } from "./sandbox-provider";
@@ -28,6 +28,7 @@ export interface CreateSandboxOptions<
  *  `resumeSession` — Claude **agent session** chaining is a fresh-sandbox
  *  concern only (per #14, ADR / CONTEXT). */
 export type SandboxRunOptions = PromptOption & {
+  readonly name?: string;
   readonly maxIterations?: number;
   readonly completionSignal?: string | readonly string[];
   readonly idleTimeoutSeconds?: number;
@@ -38,8 +39,13 @@ export type SandboxRunOptions = PromptOption & {
   readonly resumeSession?: never;
 };
 
-export type SandboxInteractiveOptions = PromptOption & {
+/** Per-call options for `sandbox.interactive()`. Like top-level
+ *  `InteractiveOptions` minus the fields inherited from `createSandbox()`
+ *  (`cwd`, `branchStrategy`, `copyToWorktree`, `hooks`, `timeouts`). The
+ *  prompt is optional — callers may launch a TUI with no seed. */
+export type SandboxInteractiveOptions = OptionalPromptOption & {
   readonly env?: Readonly<Record<string, string>>;
+  readonly signal?: AbortSignal;
 };
 
 export interface CloseResult {

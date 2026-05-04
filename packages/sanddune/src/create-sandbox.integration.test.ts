@@ -9,6 +9,7 @@ import {
   AgentInvoker,
   type AgentInvokerService,
   type AgentProvider,
+  type AgentStreamEvent,
   type BindMountSandboxHandle,
   type BindMountSandboxProvider,
 } from "./core";
@@ -336,6 +337,304 @@ describe("createSandbox (integration)", () => {
     expect(ticks).toEqual(["tick"]);
   });
 
+  test("sandbox.run() forwards agent stream events to logging.onAgentStreamEvent", async () => {
+    const closeCalls: number[] = [];
+    const provider = makeBindMountProvider({ closeCalls });
+    const agent: AgentProvider = {
+      name: "stub",
+      buildCommand: () => "true",
+      parseLine: () => [],
+    };
+
+    const handleRef: { current: BindMountSandboxHandle | undefined } = {
+      current: undefined,
+    };
+
+    // Streaming invoker — invokes onEvent for each event as a real provider
+    // would, so we exercise the run-session forwarder, not just the loop.
+    const streamingInvoker: AgentInvokerService = {
+      invoke: ({ iteration, onEvent }) =>
+        Effect.tryPromise({
+          try: async () => {
+            const events: AgentStreamEvent[] = [
+              {
+                type: "text",
+                content: `iter ${iteration} hello\n`,
+                iteration,
+                timestamp: Date.now(),
+              },
+              {
+                type: "text",
+                content: `iter ${iteration} world\n`,
+                iteration,
+                timestamp: Date.now(),
+              },
+            ];
+            for (const event of events) onEvent?.(event);
+            return { events };
+          },
+          catch: (e) => (e instanceof Error ? e : new Error(String(e))),
+        }),
+    };
+
+    const seen: AgentStreamEvent[] = [];
+
+    await using sandbox = await createSandboxProgram(
+      {
+        agent,
+        sandbox: capturing(provider, handleRef),
+        branch: "agent/events",
+        cwd: repo,
+      },
+      { agentInvokerLayer: Layer.succeed(AgentInvoker, streamingInvoker) },
+    );
+
+    await sandbox.run({
+      prompt: "go",
+      logging: {
+        type: "file",
+        onAgentStreamEvent: (event) => {
+          seen.push(event);
+        },
+      },
+    });
+
+    expect(seen).toHaveLength(2);
+    expect(seen[0]?.type).toBe("text");
+    expect((seen[0] as { content: string }).content).toContain("hello");
+    expect((seen[1] as { content: string }).content).toContain("world");
+  });
+
+  describe("sandbox.interactive()", () => {
+    test("invokes execInteractive with the agent's interactive command and skipPermissions=true", async () => {
+      const interactiveCalls: { command: string; cwd: string | undefined }[] = [];
+      const closeCalls: number[] = [];
+      const provider = makeInteractiveBindMountProvider({
+        closeCalls,
+        interactiveCalls,
+      });
+      const agent: AgentProvider = {
+        name: "fake",
+        buildCommand: () => "true",
+        parseLine: () => [],
+        buildInteractiveCommand: ({ prompt, skipPermissions }) =>
+          `echo skip=${skipPermissions} prompt=${prompt ?? "<none>"}`,
+      };
+
+      const handleRef: { current: BindMountSandboxHandle | undefined } = {
+        current: undefined,
+      };
+      const noopInvoker: AgentInvokerService = {
+        invoke: () => Effect.succeed({ events: [] }),
+      };
+
+      await using sandbox = await createSandboxProgram(
+        {
+          agent,
+          sandbox: capturing(provider, handleRef),
+          branch: "agent/tui",
+          cwd: repo,
+        },
+        { agentInvokerLayer: Layer.succeed(AgentInvoker, noopInvoker) },
+      );
+
+      await sandbox.interactive({ prompt: "hi there" });
+
+      expect(interactiveCalls).toHaveLength(1);
+      expect(interactiveCalls[0]!.command).toBe("echo skip=true prompt=hi there");
+    });
+
+    test("launches without a prompt when none supplied", async () => {
+      const interactiveCalls: { command: string; cwd: string | undefined }[] = [];
+      const closeCalls: number[] = [];
+      const provider = makeInteractiveBindMountProvider({
+        closeCalls,
+        interactiveCalls,
+      });
+      const agent: AgentProvider = {
+        name: "fake",
+        buildCommand: () => "true",
+        parseLine: () => [],
+        buildInteractiveCommand: ({ prompt }) =>
+          `echo prompt=${prompt ?? "<no-prompt>"}`,
+      };
+
+      const handleRef: { current: BindMountSandboxHandle | undefined } = {
+        current: undefined,
+      };
+      const noopInvoker: AgentInvokerService = {
+        invoke: () => Effect.succeed({ events: [] }),
+      };
+
+      await using sandbox = await createSandboxProgram(
+        {
+          agent,
+          sandbox: capturing(provider, handleRef),
+          branch: "agent/tui-empty",
+          cwd: repo,
+        },
+        { agentInvokerLayer: Layer.succeed(AgentInvoker, noopInvoker) },
+      );
+
+      await sandbox.interactive({});
+
+      expect(interactiveCalls).toHaveLength(1);
+      expect(interactiveCalls[0]!.command).toBe("echo prompt=<no-prompt>");
+    });
+
+    test("rejects when the bind-mount handle lacks execInteractive", async () => {
+      const closeCalls: number[] = [];
+      const provider: BindMountSandboxProvider = {
+        kind: "bind-mount",
+        name: "no-interactive",
+        create: async ({ worktreePath }) => ({
+          worktreePath,
+          exec: async () => ({ stdout: "", stderr: "", exitCode: 0 }),
+          close: async () => {
+            closeCalls.push(1);
+          },
+        }),
+      };
+      const agent: AgentProvider = {
+        name: "fake",
+        buildCommand: () => "true",
+        parseLine: () => [],
+        buildInteractiveCommand: () => "true",
+      };
+
+      const handleRef: { current: BindMountSandboxHandle | undefined } = {
+        current: undefined,
+      };
+      const noopInvoker: AgentInvokerService = {
+        invoke: () => Effect.succeed({ events: [] }),
+      };
+
+      await using sandbox = await createSandboxProgram(
+        {
+          agent,
+          sandbox: capturing(provider, handleRef),
+          branch: "agent/no-execint",
+          cwd: repo,
+        },
+        { agentInvokerLayer: Layer.succeed(AgentInvoker, noopInvoker) },
+      );
+
+      await expect(sandbox.interactive({ prompt: "x" })).rejects.toThrow(
+        /does not support interactive sessions/,
+      );
+    });
+
+    test("rejects when the agent provider lacks buildInteractiveCommand", async () => {
+      const closeCalls: number[] = [];
+      const provider = makeInteractiveBindMountProvider({
+        closeCalls,
+        interactiveCalls: [],
+      });
+      const agent: AgentProvider = {
+        name: "afk-only",
+        buildCommand: () => "true",
+        parseLine: () => [],
+      };
+
+      const handleRef: { current: BindMountSandboxHandle | undefined } = {
+        current: undefined,
+      };
+      const noopInvoker: AgentInvokerService = {
+        invoke: () => Effect.succeed({ events: [] }),
+      };
+
+      await using sandbox = await createSandboxProgram(
+        {
+          agent,
+          sandbox: capturing(provider, handleRef),
+          branch: "agent/no-tui",
+          cwd: repo,
+        },
+        { agentInvokerLayer: Layer.succeed(AgentInvoker, noopInvoker) },
+      );
+
+      await expect(sandbox.interactive({ prompt: "x" })).rejects.toThrow(
+        /does not support interactive/,
+      );
+    });
+
+    test("rejects after close()", async () => {
+      const closeCalls: number[] = [];
+      const provider = makeInteractiveBindMountProvider({
+        closeCalls,
+        interactiveCalls: [],
+      });
+      const agent: AgentProvider = {
+        name: "fake",
+        buildCommand: () => "true",
+        parseLine: () => [],
+        buildInteractiveCommand: () => "true",
+      };
+
+      const handleRef: { current: BindMountSandboxHandle | undefined } = {
+        current: undefined,
+      };
+      const noopInvoker: AgentInvokerService = {
+        invoke: () => Effect.succeed({ events: [] }),
+      };
+
+      const sandbox = await createSandboxProgram(
+        {
+          agent,
+          sandbox: capturing(provider, handleRef),
+          branch: "agent/closed-tui",
+          cwd: repo,
+        },
+        { agentInvokerLayer: Layer.succeed(AgentInvoker, noopInvoker) },
+      );
+
+      await sandbox.close();
+      await expect(sandbox.interactive({ prompt: "x" })).rejects.toThrow(
+        /after close/,
+      );
+    });
+
+    test("pre-aborted signal rejects with the caller's reason", async () => {
+      const interactiveCalls: { command: string; cwd: string | undefined }[] = [];
+      const closeCalls: number[] = [];
+      const provider = makeInteractiveBindMountProvider({
+        closeCalls,
+        interactiveCalls,
+      });
+      const agent: AgentProvider = {
+        name: "fake",
+        buildCommand: () => "true",
+        parseLine: () => [],
+        buildInteractiveCommand: () => "echo should-not-run",
+      };
+
+      const handleRef: { current: BindMountSandboxHandle | undefined } = {
+        current: undefined,
+      };
+      const noopInvoker: AgentInvokerService = {
+        invoke: () => Effect.succeed({ events: [] }),
+      };
+
+      await using sandbox = await createSandboxProgram(
+        {
+          agent,
+          sandbox: capturing(provider, handleRef),
+          branch: "agent/abort-tui",
+          cwd: repo,
+        },
+        { agentInvokerLayer: Layer.succeed(AgentInvoker, noopInvoker) },
+      );
+
+      const ac = new AbortController();
+      ac.abort(new Error("user cancel"));
+
+      await expect(
+        sandbox.interactive({ prompt: "x", signal: ac.signal }),
+      ).rejects.toThrow(/user cancel/);
+      expect(interactiveCalls).toHaveLength(0);
+    });
+  });
+
   test("close() is idempotent — second call is a no-op", async () => {
     const closeCalls: number[] = [];
     const provider = makeBindMountProvider({ closeCalls });
@@ -401,6 +700,47 @@ function makeBindMountProvider(input: {
         },
       };
     },
+  };
+}
+
+/** Like `makeBindMountProvider` but also implements `execInteractive`,
+ *  recording every call so tests can assert what command the sandbox tried
+ *  to launch. Pre-aborted signals throw before recording, mirroring the
+ *  real provider contract. */
+function makeInteractiveBindMountProvider(input: {
+  readonly closeCalls: number[];
+  readonly interactiveCalls: { command: string; cwd: string | undefined }[];
+}): BindMountSandboxProvider {
+  const { closeCalls, interactiveCalls } = input;
+  return {
+    kind: "bind-mount",
+    name: "fake-interactive",
+    create: async ({ worktreePath }) => ({
+      worktreePath,
+      exec: async (command, opts) => {
+        const r = spawnSync("sh", ["-c", command], {
+          cwd: opts?.cwd ?? worktreePath,
+          encoding: "utf8",
+        });
+        return {
+          stdout: r.stdout ?? "",
+          stderr: r.stderr ?? "",
+          exitCode: r.status ?? 0,
+        };
+      },
+      execInteractive: async (command, opts) => {
+        opts?.signal?.throwIfAborted?.();
+        interactiveCalls.push({ command, cwd: opts?.cwd });
+        const r = spawnSync("sh", ["-c", command], {
+          cwd: opts?.cwd ?? worktreePath,
+          encoding: "utf8",
+        });
+        return { exitCode: r.status ?? 0 };
+      },
+      close: async () => {
+        closeCalls.push(1);
+      },
+    }),
   };
 }
 

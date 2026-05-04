@@ -36,6 +36,9 @@ export interface OpenRunSessionInput {
   /** Optional display name prefixed in log output for parallel-run
    *  readability — e.g. `[issue-42] tail -f …`. */
   readonly name?: string;
+  /** Branch the run targets, when known. Forwarded to the file-mode session
+   *  so the default log filename includes it. Ignored in stdout mode. */
+  readonly branch?: string;
 }
 
 /** Picks the **run session** implementation from `logging.type`. Defaults to
@@ -53,6 +56,7 @@ export async function openRunSession(
   return openFileRunSession({
     cwd: input.cwd,
     ...(input.name !== undefined && { name: input.name }),
+    ...(input.branch !== undefined && { branch: input.branch }),
     ...(logging?.path !== undefined && {
       path: resolveLogPath(logging.path, input.cwd),
     }),

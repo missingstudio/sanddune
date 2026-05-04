@@ -36,11 +36,33 @@ export interface RunLog {
   close(): Promise<void>;
 }
 
+export interface OpenRunLogDefaults {
+  readonly runId: string;
+  /** Branch the run targets, when known. Sanitized (`/` → `-`) and prefixed
+   *  to the filename so parallel runs are visually distinguishable in
+   *  `.sanddune/logs/` and in `tail -f` output. */
+  readonly branch?: string;
+  /** Optional display name supplied by the caller (e.g. `[issue-42]`).
+   *  Sanitized the same way as `branch` and joined with `-`. */
+  readonly name?: string;
+}
+
 export async function openRunLog(
   cwd: string,
-  runId: string,
+  defaults: OpenRunLogDefaults,
 ): Promise<RunLog> {
-  return openRunLogAtPath(join(cwd, ".sanddune", "logs", `${runId}.jsonl`));
+  const segments = [defaults.branch, defaults.name, defaults.runId]
+    .filter((s): s is string => s !== undefined && s.length > 0)
+    .map(sanitizeSegment);
+  const filename = `${segments.join("-")}.jsonl`;
+  return openRunLogAtPath(join(cwd, ".sanddune", "logs", filename));
+}
+
+// Branch and name segments may contain `/` or other path-unsafe chars. Mirror
+// `worktree-manager.sanitizeBranchForPath` for branches; collapse anything
+// non-`[A-Za-z0-9._-]` to `-` so a stray symbol can't break path joins.
+function sanitizeSegment(s: string): string {
+  return s.replace(/[^A-Za-z0-9._-]/g, "-");
 }
 
 export async function openRunLogAtPath(path: string): Promise<RunLog> {

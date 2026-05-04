@@ -306,25 +306,38 @@ await sandbox.run({ prompt: "Review the changes and fix anything off." });
 | `branch`                | `string`                                          | The branch the sandbox is on                                                     |
 | `worktreePath`          | `string`                                          | Host path to the worktree                                                        |
 | `run(options)`          | `(SandboxRunOptions) => Promise<RunResult>`       | Invoke an agent inside the existing sandbox                                      |
-| `interactive(options)`  | `(SandboxInteractiveOptions) => Promise<void>`    | Throws `NotImplementedError` today                                               |
+| `interactive(options)`  | `(SandboxInteractiveOptions) => Promise<void>`    | Launches the agent's TUI inside the existing sandbox; reuses the long-lived container (no rebuild). Requires the provider to implement `execInteractive` |
 | `close()`               | `() => Promise<CloseResult>`                      | Tears down the container; tears down the worktree iff the `Sandbox` owns it (ADR-0010) |
 | `[Symbol.asyncDispose]` | `() => Promise<void>`                             | Auto teardown via `await using`                                                  |
 
 #### `SandboxRunOptions`
 
-Equals top-level `RunOptions` minus the fields fixed at creation time (`agent`, `sandbox`, `cwd`, `branchStrategy`, `hooks`, `copyToWorktree`, `timeouts`, `name`) and minus `resumeSession` (rejected at the type level — Claude session resume is a fresh-sandbox concern only).
+Equals top-level `RunOptions` minus the fields fixed at creation time (`agent`, `sandbox`, `cwd`, `branchStrategy`, `hooks`, `copyToWorktree`, `timeouts`) and minus `resumeSession` (rejected at the type level — Claude session resume is a fresh-sandbox concern only).
 
 | Option               | Type                               | Behavior                                                                              |
 | -------------------- | ---------------------------------- | ------------------------------------------------------------------------------------- |
 | `prompt`             | `string`                           | Inline prompt (mutually exclusive with `promptFile`)                                  |
 | `promptFile`         | `string`                           | Path to a prompt template                                                             |
 | `promptArgs`         | `Record<string, string \| number>` | Values for `{{KEY}}` placeholders                                                     |
+| `name`               | `string`                           | Display name prefixed in log output (e.g. `[issue-42] tail -f …`); also included in the default log filename |
 | `maxIterations`      | `number`                           | Default `1`. Each call has its own independent iteration loop (ADR-0011)              |
 | `completionSignal`   | `string \| string[]`               | Default `<promise>COMPLETE</promise>`                                                 |
 | `idleTimeoutSeconds` | `number`                           | Default `600`                                                                         |
 | `env`                | `Record<string, string>`           | Per-call env override; merged with the creation-time env                              |
 | `logging`            | `LoggingOption`                    | Overrides the creation-time default                                                   |
 | `signal`             | `AbortSignal`                      | Aborting kills the in-flight agent; the sandbox stays usable for a re-run (ADR-0011)  |
+
+#### `SandboxInteractiveOptions`
+
+Per-call options for `sandbox.interactive()`. Like top-level `InteractiveOptions` minus the fields fixed at creation time (`agent`, `sandbox`, `cwd`, `branchStrategy`, `hooks`, `copyToWorktree`, `timeouts`, `name`). The prompt is optional — callers may launch a TUI with no seed.
+
+| Option       | Type                               | Behavior                                                                  |
+| ------------ | ---------------------------------- | ------------------------------------------------------------------------- |
+| `prompt`     | `string`                           | Optional seed message for the TUI (mutually exclusive with `promptFile`)  |
+| `promptFile` | `string`                           | Path to a prompt template                                                 |
+| `promptArgs` | `Record<string, string \| number>` | Values for `{{KEY}}` placeholders                                         |
+| `env`        | `Record<string, string>`           | Per-call env override; merged with the creation-time env                  |
+| `signal`     | `AbortSignal`                      | Pre-aborted signal rejects without launching the TUI                      |
 
 #### `CloseResult`
 

@@ -14,7 +14,10 @@ import {
   type Timeouts,
   type LoggingOption,
 } from "../core";
-import { NotImplementedError } from "../core";
+import {
+  buildAgentInteractiveCommand,
+  resolveInteractivePrompt,
+} from "./interactive-shared";
 import { makeProductionAgentInvoker } from "./agent-invoker-live";
 import { runCopyToWorktree } from "./copy-to-worktree";
 import { gitHeadSha } from "./git";
@@ -185,7 +188,9 @@ function makeSandboxHandle(input: MakeSandboxHandleInput): Sandbox {
     const logging = options.logging ?? input.creationLogging;
     const session = await openRunSession({
       cwd: input.hostRepoPath,
+      branch: strategy.resultBranch,
       ...(logging !== undefined && { logging }),
+      ...(options.name !== undefined && { name: options.name }),
     });
 
     const beforeSha = await gitHeadSha(strategy.worktreePath);
@@ -281,13 +286,52 @@ function makeSandboxHandle(input: MakeSandboxHandleInput): Sandbox {
       : { worktreePreserved: false };
   };
 
+  const interactiveOnce = async (
+    options: SandboxInteractiveOptions,
+  ): Promise<void> => {
+    if (closed) {
+      throw new Error("sandbox.interactive() called after close()");
+    }
+    if (handle.execInteractive === undefined) {
+      throw new Error(
+        `Sandbox provider does not support interactive sessions (no execInteractive). ` +
+          `The provider must implement execInteractive on BindMountSandboxHandle.`,
+      );
+    }
+
+    const prompt = await resolveInteractivePrompt({
+      promptInput: {
+        ...(options.prompt !== undefined && { prompt: options.prompt }),
+        ...(options.promptFile !== undefined && {
+          promptFile: options.promptFile,
+        }),
+        ...(options.promptArgs !== undefined && {
+          promptArgs: options.promptArgs,
+        }),
+      },
+      sourceBranch: strategy.sourceBranch,
+      targetBranch: strategy.targetBranch,
+      execAdapter: (cmd) => handle.exec(cmd),
+    });
+
+    const command = buildAgentInteractiveCommand({
+      agent,
+      prompt,
+      // Long-lived sandbox containers are explicitly trusted at construction
+      // time — same default the top-level interactive() bind-mount path uses.
+      skipPermissions: true,
+    });
+
+    await handle.execInteractive(command, {
+      ...(options.signal !== undefined && { signal: options.signal }),
+    });
+  };
+
   return {
     branch: strategy.resultBranch,
     worktreePath: strategy.worktreePath,
     run: runOnce,
-    interactive: async (_options: SandboxInteractiveOptions) => {
-      throw new NotImplementedError("Sandbox.interactive");
-    },
+    interactive: interactiveOnce,
     close,
     [Symbol.asyncDispose]: async () => {
       await close();

@@ -250,3 +250,16 @@ async function gitStatusIsDirty(cwd: string): Promise<boolean> {
   const result = await runGit(cwd, ["status", "--porcelain"]);
   return result.stdout.trim().length > 0;
 }
+
+/** Best-effort `git worktree prune` to evict admin entries for worktree
+ *  directories that no longer exist on disk (e.g. a previous run was killed
+ *  before `close()` could remove its worktree). Swallows all errors —
+ *  callers run this as a hygiene step before creating a new worktree, and
+ *  a prune failure should not block creation. */
+export async function pruneStaleWorktrees(cwd: string): Promise<void> {
+  try {
+    await runGit(cwd, ["worktree", "prune"]);
+  } catch {
+    // Intentionally swallowed — this is hygiene, not correctness.
+  }
+}

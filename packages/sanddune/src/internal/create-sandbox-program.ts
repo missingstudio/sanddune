@@ -10,6 +10,7 @@ import {
 } from "./create-sandbox";
 import { resolveEnv } from "./env-resolver";
 import { gitCurrentBranch } from "./git";
+import { pruneStaleWorktrees } from "./worktree-manager";
 import { createWorktreeStrategy } from "./worktree-strategy";
 
 export async function createSandboxProgram(
@@ -34,6 +35,7 @@ export async function createSandboxProgram(
   });
 
   const targetBranch = await gitCurrentBranch(cwd);
+  await pruneStaleWorktrees(cwd);
 
   // `branch: string` is the only knob — long-lived sandboxes are
   // single-branch by construction, so there is no `branchStrategy`
@@ -48,7 +50,7 @@ export async function createSandboxProgram(
 
   // On lifecycle failure, the helper closes any partial container and (because
   // `ownsWorktree` is true here) unwinds the worktree before rethrowing.
-  return await createSandboxFromWorktree({
+  const sandbox = await createSandboxFromWorktree({
     agent: options.agent,
     provider,
     hostRepoPath: cwd,
@@ -61,4 +63,51 @@ export async function createSandboxProgram(
     ownsWorktree: true,
     seams,
   });
+
+  return installSignalPreservation(sandbox, strategy.worktreePath);
+}
+
+/** Install SIGINT/SIGTERM handlers that print worktree-recovery instructions
+ *  before the process exits, so a Ctrl-C mid-run doesn't leave the user
+ *  stranded with a worktree they don't know how to clean up. Handlers are
+ *  removed when the returned sandbox's `close()` (or `Symbol.asyncDispose`)
+ *  fires the normal teardown path. */
+function installSignalPreservation(
+  sandbox: Sandbox,
+  worktreePath: string,
+): Sandbox {
+  const onSignal = () => {
+    process.stderr.write(
+      `\nsanddune: worktree preserved at ${worktreePath}\n` +
+        `  To review:    cd ${worktreePath}\n` +
+        `  To clean up:  git worktree remove --force ${worktreePath}\n`,
+    );
+    process.exit(1);
+  };
+
+  process.on("SIGINT", onSignal);
+  process.on("SIGTERM", onSignal);
+
+  let removed = false;
+  const removeHandlers = () => {
+    if (removed) return;
+    removed = true;
+    process.removeListener("SIGINT", onSignal);
+    process.removeListener("SIGTERM", onSignal);
+  };
+
+  return {
+    branch: sandbox.branch,
+    worktreePath: sandbox.worktreePath,
+    run: (opts) => sandbox.run(opts),
+    interactive: (opts) => sandbox.interactive(opts),
+    close: async () => {
+      removeHandlers();
+      return sandbox.close();
+    },
+    [Symbol.asyncDispose]: async () => {
+      removeHandlers();
+      await sandbox.close();
+    },
+  };
 }

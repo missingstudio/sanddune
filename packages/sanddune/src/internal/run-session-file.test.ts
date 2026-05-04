@@ -29,6 +29,31 @@ describe("openFileRunSession", () => {
     expect(content).toContain(`"status":"ok"`);
   });
 
+  test("default filename includes branch and name when supplied", async () => {
+    const session = await openFileRunSession({
+      cwd: dir,
+      branch: "agent/feat",
+      name: "issue 42",
+    });
+    await session.endOk();
+
+    // Branch's `/` and name's space both sanitize to `-`. Run-id suffix still
+    // present so parallel `sandbox.run({ branch, name })` calls never collide.
+    expect(session.logFilePath).toMatch(
+      /\.sanddune\/logs\/agent-feat-issue-42-.+\.jsonl$/,
+    );
+  });
+
+  test("default filename uses just branch when name omitted", async () => {
+    const session = await openFileRunSession({
+      cwd: dir,
+      branch: "main",
+    });
+    await session.endOk();
+
+    expect(session.logFilePath).toMatch(/\.sanddune\/logs\/main-.+\.jsonl$/);
+  });
+
   test("custom path is used verbatim and parent dirs are created", async () => {
     const customPath = join(dir, "nested", "logs", "my-run.jsonl");
     const session = await openFileRunSession({ cwd: dir, path: customPath });
