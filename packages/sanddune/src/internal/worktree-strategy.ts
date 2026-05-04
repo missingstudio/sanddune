@@ -3,6 +3,7 @@ import { gitBranchDelete, gitMerge } from "./git";
 import {
   createBranchWorktree,
   createMergeToHeadWorktree,
+  pruneStaleWorktrees,
   type ManagedWorktree,
 } from "./worktree-manager";
 
@@ -81,6 +82,11 @@ async function createNamedBranchStrategy(args: {
   branch: string;
   targetBranch: string;
 }): Promise<WorktreeStrategy> {
+  // Evict admin entries left behind by previous runs killed before close().
+  // Only relevant for `branch` (deterministic path → collisions possible);
+  // `merge-to-head` uses random ids and `head` doesn't create a worktree.
+  await pruneStaleWorktrees(args.cwd);
+
   const worktree: ManagedWorktree = await createBranchWorktree({
     cwd: args.cwd,
     branch: args.branch,

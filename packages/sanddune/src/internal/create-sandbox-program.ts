@@ -10,7 +10,6 @@ import {
 } from "./create-sandbox";
 import { resolveEnv } from "./env-resolver";
 import { gitCurrentBranch } from "./git";
-import { pruneStaleWorktrees } from "./worktree-manager";
 import { createWorktreeStrategy } from "./worktree-strategy";
 
 export async function createSandboxProgram(
@@ -35,12 +34,12 @@ export async function createSandboxProgram(
   });
 
   const targetBranch = await gitCurrentBranch(cwd);
-  await pruneStaleWorktrees(cwd);
 
   // `branch: string` is the only knob — long-lived sandboxes are
   // single-branch by construction, so there is no `branchStrategy`
   // surface here (CONTEXT.md "createSandbox opts out of the branch
-  // strategy abstraction").
+  // strategy abstraction"). Stale-worktree hygiene now lives inside
+  // `createWorktreeStrategy` for the `branch` case.
   const strategy = await createWorktreeStrategy({
     strategy: { type: "branch", branch: options.branch },
     providerKind: provider.kind,
